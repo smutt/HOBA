@@ -1,0 +1,35 @@
+{
+  "title": "HOBA",
+  "name": "hoba",
+  "version": "0.0.1",
+  "description": "Implements HOBA(RFC7486)",
+  "main": "index.js",
+  "author": "Andrew McConachie",
+  "engines": {
+    "firefox": ">=38.0a1",
+    "fennec": ">=38.0a1"
+  },
+  "license": "GNU",
+  "keywords": [
+    "hoba"
+  ],
+  "preferences": [
+    {
+      "name": "derp",
+      "title": "Derp Name",
+      "description": "What do we name our derp?",
+      "type": "string",
+      "value": "Derpicus"
+    },
+    {
+      "description": "Does it have tentacles?",
+      "type": "bool",
+      "name": "hasTentacles",
+      "value": true,
+      "title": "Tentacles"
+    }
+  ],
+  "dependencies": {
+    "menuitem": "0.0.5"
+  }
+}

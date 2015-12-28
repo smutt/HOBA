@@ -1,0 +1,19 @@
+#
+# HOBA - No Password HTTP Authentication
+#
+# Yes, this is another README file:-)
+# This one is for the JS to explain minification
+# Check out the Makefile for info but basically
+# a make will re-construct the hoba-min.js and
+# worker-min.js files.
+#
+# Copyright (C) 2013, Tolerant Networks Limited
+#
+# Stephen Farrell, <stephen@tolerantnetworks.com>
+#
+# This program is free software, distributed under the terms of
+# the GNU General Public License
+#
+
+I use the yui-compressor minifier. If you modify the
+source js files here then you need to rebuild.
