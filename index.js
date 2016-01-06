@@ -32,8 +32,11 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
+  // Is auth-type HOBA?
   var authChallenge = aSubject.getResponseHeader("WWW-Authenticate");
+  if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
   dump("\nauth:" + authChallenge)
+
   var chal = authChallenge.match(/challenge=(.*?),/)[1]
   dump("\nchal:" + chal)
   var authChal = hoba.make_auth_header_chal(chal)
