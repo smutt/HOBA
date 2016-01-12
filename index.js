@@ -38,20 +38,23 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
-  var origin = hoba.get_origin(aSubject.URI.spec)
-  dump("\norigin:" + origin)
-
-  var authChal = hoba.make_auth_header_chal(chal)
-  dump("\nauthChal:" + authChal)
+  var origin = hoba.get_origin(aSubject.URI.spec) // scheme:auth:port (no slashes)
+  if(! getKey(origin)){
+    // Make new key
+  }else{
+    // Do a post to some URI
+  }
 
   
-  hoba.get_key
+//  var authChal = hoba.make_auth_header_chal(chal)
+//  dump("\nauthChal:" + authChal)
+
   
   //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
 
 }
 
-ss.storage.myString = "derp";
+
 
 var menuItem = menuItem.Menuitem({
   id: "clickme",
@@ -79,7 +82,30 @@ function showCfgPanel(state) {
 
 // register http request listener
 registerHttp();
-//unregisterHttp();
+initKeyStorage();
+
+// Initialize simple storage from scratch
+// For now this does not persist across restarts
+function initKeyStorage(){
+  if(ss.storage.keys === undefined){
+    ss.storage.keys = {};
+  }
+}
+
+// Returns key associated with origin
+// If no key stored returns false
+function getKey(origin){
+  if(ss.storage.keys[origin] === undefined || ss.storage.keys[origin] === null){ 
+    return false;
+  }else{
+    return ss.storage.keys[origin];
+  }
+}
+
+// Stores a key
+function storeKey(origin, key){
+  ss.storage.keys[origin] = key;
+}
 
 
 /*
