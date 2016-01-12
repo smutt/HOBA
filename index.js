@@ -33,21 +33,30 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
   var chal = authChallenge.match(/challenge=(.*?),/)[1]
   dump("\nchal:" + chal)
+
+  if(authChallenge.search("realm=") == -1){
+    var realm = "";
+  }else{
+    var realm = authChallenge.match(/realm=(.*?),/)[1];
+  }
+  dump("\nrealm:" + realm);
   
   // Is the connection using TLS?
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
-  var origin = hoba.get_origin(aSubject.URI.spec) // scheme:auth:port (no slashes)
-  if(! getKey(origin)){
+  var origin = hoba.get_origin(aSubject.URI.spec)
+  if(! getKey(origin, realm)){
+    dump("\nNo key")
+    worker = new Worker('/lib/worker.js');
+    dump("\nConstructed worker");
     // Make new key
   }else{
+    dump("\nKey present")
+    //  var authChal = hoba.make_auth_header_chal(chal)
+    //  dump("\nauthChal:" + authChal)
     // Do a post to some URI
   }
-
-  
-//  var authChal = hoba.make_auth_header_chal(chal)
-//  dump("\nauthChal:" + authChal)
 
   
   //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
@@ -94,17 +103,19 @@ function initKeyStorage(){
 
 // Returns key associated with origin
 // If no key stored returns false
-function getKey(origin){
-  if(ss.storage.keys[origin] === undefined || ss.storage.keys[origin] === null){ 
+function getKey(origin, realm){
+  var idx = origin + "_" + realm;
+  if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){ 
     return false;
   }else{
-    return ss.storage.keys[origin];
+    return ss.storage.keys[idx];
   }
 }
 
 // Stores a key
-function storeKey(origin, key){
-  ss.storage.keys[origin] = key;
+function storeKey(origin, realm, key){
+  var idx = origin + "_" + realm;
+  ss.storage.keys[idx] = key;
 }
 
 
