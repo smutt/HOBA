@@ -1,11 +1,10 @@
-var self = require('sdk/self');
+var self = require("sdk/self");
 var data = require("sdk/self").data;
 var ss = require("sdk/simple-storage");
+let { Cu, Cc, Ci } = require('chrome');
 var menuItem = require("menuitem");
-let { Cc, Ci } = require('chrome');
-
-// HOBA specific libs
-var hoba =require("./lib/hoba.js");
+var hoba =require("./lib/hoba.js"); // HOBA specific libs
+Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 
 // Register observer service
 function registerHttp(){
@@ -48,22 +47,15 @@ function handleHttpReq(aSubject, aTopic, aData){
   var origin = hoba.get_origin(aSubject.URI.spec)
   if(! getKey(origin, realm)){
     dump("\nNo key")
-    worker = new Worker('/lib/worker.js');
-    dump("\nConstructed worker");
     // Make new key
   }else{
     dump("\nKey present")
-    //  var authChal = hoba.make_auth_header_chal(chal)
-    //  dump("\nauthChal:" + authChal)
     // Do a post to some URI
   }
 
-  
   //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
 
 }
-
-
 
 var menuItem = menuItem.Menuitem({
   id: "clickme",
@@ -89,16 +81,24 @@ function showCfgPanel(state) {
   cfgPanel.show();
 }
 
-// register http request listener
-registerHttp();
-initKeyStorage();
-
-// Initialize simple storage from scratch
+// Check if simple storage is already init'd
+// If not init from scratch
+// Return False if not init'd
+// Otherwise return True
 // For now this does not persist across restarts
 function initKeyStorage(){
-  if(ss.storage.keys === undefined){
+  if(! ss.storage.exists){
+    ss.storage.exists = true;
     ss.storage.keys = {};
+    return false;
+  }else{
+    return true;
   }
+}
+
+// Clobbers key storage
+function resetKeyStorage(){
+  ss.storage.keys = null
 }
 
 // Returns key associated with origin
@@ -113,18 +113,42 @@ function getKey(origin, realm){
 }
 
 // Stores a key
-function storeKey(origin, realm, key){
+function storeKey(key, origin, realm=""){
   var idx = origin + "_" + realm;
   ss.storage.keys[idx] = key;
 }
 
-
+// Many thanks to https://github.com/diafygi/webcrypto-examples
+function genKey(){
+  crypto.subtle.generateKey( // See RFC 7486 section 7 for details
+  {
+    name: "RSASSA-PKCS1-v1_5",
+    modulusLength: 2048,
+    publicExponent: new Uint8Array([0x001, 0x00, 0x01]),
+    hash: {name: "SHA-256"}    
+  },
+    true,
+    ["sign", "verify"]
+  )
+    .then(function(key){ // Returns a keypair object
+      return key;
+    })
+    .catch(function(err){
+      dump("\ngenKey() Error:" + err);
+    });
+}
+ 
 /*
-// a dummy function, to show how tests work.
-// to see how to test this function, look at test/test-index.js
-function dummy(text, callback) {
-  callback(text);
+  BEGIN EXECUTION
+*/
+dump("\nBEGIN EXECUTION");
+ss.storage.derp = "DERP";
+ss.storage.arr = [{id: "arr"}];
+registerHttp(); // register http request listener
+if(! initKeyStorage()){ // Initialize our storage
+  dump("\nGenerating new RSA key and storing it");
+  storeKey(genKey(), "tmp"); // Generate a new temporary RSA key pair
+  dump("\nStored new RSA key");
 }
 
-exports.dummy = dummy;
-*/
+
