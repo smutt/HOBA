@@ -87,8 +87,9 @@ function showCfgPanel(state) {
 // Otherwise return True
 // For now this does not persist across restarts
 function initKeyStorage(){
-  if(! ss.storage.exists){
-    ss.storage.exists = true;
+  if(! ss.storage.keys_exists){
+    resetKeyStorage();
+    ss.storage.keys_exists = true;
     ss.storage.keys = {};
     return false;
   }else{
@@ -99,39 +100,99 @@ function initKeyStorage(){
 // Clobbers key storage
 function resetKeyStorage(){
   ss.storage.keys = null
+  ss.storage.keys_exists = false;
+}
+
+// Stores a key
+// Takes the key, isPub, origin, and realm
+// Where isPub is true for public keys, and false for private keys
+function storeKey(key, isPub, origin, realm=""){
+  var idx = keyIdx(isPub, origin, realm);
+  crypto.subtle.exportKey("jwk", key)
+    .then(function(str){
+      ss.storage.keys[idx] = str;
+      dump("\nStored key " + idx);
+    })
+    .catch(function(err){
+      dump("\nstoreKey() Error:" + err);
+    });
+}
+
+// Computes key Index for storage
+function keyIdx(isPub, origin, realm){
+  var delim = "!"; // Our delimeter for storage, it's not clear what the character space is for HTTP realms
+  if(realm.length == 0){
+    realm = " ";
+  }
+  if(isPub){
+    return origin + delim + realm + delim + "pub";
+  }else{
+    return origin + delim + realm + delim + "pri";
+  }
 }
 
 // Returns key associated with origin
 // If no key stored returns false
-function getKey(origin, realm){
-  var idx = origin + "_" + realm;
+function getKey(isPub, origin, realm=""){
+  var rv = null;
+  var idx = keyIdx(isPub, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){ 
     return false;
-  }else{
-    return ss.storage.keys[idx];
   }
+
+  if(isPub){
+    usage = "verify";
+  }else{
+    usage = "sign";
+  }
+
+  crypto.subtle.importKey("jwk",
+			  ss.storage.keys[idx],
+			  { name: "RSASSA-PKCS1-v1_5",
+			    hash: {name: "SHA-256"} },
+			  false, 
+			  [usage]
+			 )
+    .then(function(key){
+      rv = key;
+    })
+    .catch(function(err){
+      dump("\nError importing public key:" + err);
+      return false;
+    });
+
+  while(rv === null){ // It shouldn't take too long :)
+    var foo = "bar";
+  }
+  return rv;
+  
 }
 
-// Stores a key
-function storeKey(key, origin, realm=""){
-  var idx = origin + "_" + realm;
-  ss.storage.keys[idx] = key;
+// Deletes a key from storage
+function delKey(isPub, origin, realm=""){
+  var idx = keyIdx(isPub, origin, realm);
+  ss.storage.keys[idx] = null;
 }
 
+// Generate a key async and store it
 // Many thanks to https://github.com/diafygi/webcrypto-examples
-function genKey(){
+function genTempKey(){
+  delKey(true, "tmp");
+  delKey(false, "tmp");
+    
   crypto.subtle.generateKey( // See RFC 7486 section 7 for details
   {
     name: "RSASSA-PKCS1-v1_5",
     modulusLength: 2048,
     publicExponent: new Uint8Array([0x001, 0x00, 0x01]),
-    hash: {name: "SHA-256"}    
+    hash: {name: "SHA-256"}
   },
     true,
     ["sign", "verify"]
   )
-    .then(function(key){ // Returns a keypair object
-      return key;
+    .then(function(keyPair){ // Returns a keypair object
+      storeKey(keyPair.publicKey, true, "tmp");
+      storeKey(keyPair.privateKey, false, "tmp");
     })
     .catch(function(err){
       dump("\ngenKey() Error:" + err);
@@ -142,13 +203,14 @@ function genKey(){
   BEGIN EXECUTION
 */
 dump("\nBEGIN EXECUTION");
-ss.storage.derp = "DERP";
-ss.storage.arr = [{id: "arr"}];
-registerHttp(); // register http request listener
+
+//resetKeyStorage();
 if(! initKeyStorage()){ // Initialize our storage
   dump("\nGenerating new RSA key and storing it");
-  storeKey(genKey(), "tmp"); // Generate a new temporary RSA key pair
-  dump("\nStored new RSA key");
+  genTempKey();
 }
 
+//storeKey(getKey(true, "tmp"), true, "tmp");
+
+registerHttp(); // register http request listener
 
