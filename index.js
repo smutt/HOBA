@@ -6,6 +6,10 @@ var menuItem = require("menuitem");
 var hoba =require("./lib/hoba.js"); // HOBA specific libs
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 
+// Our dict of keys read into memory
+// It's populated as needed from storage
+var keys = {};
+
 // Register observer service
 function registerHttp(){
   var observerService =
@@ -103,23 +107,8 @@ function resetKeyStorage(){
   ss.storage.keys_exists = false;
 }
 
-// Stores a key
-// Takes the key, isPub, origin, and realm
-// Where isPub is true for public keys, and false for private keys
-function storeKey(key, isPub, origin, realm=""){
-  var idx = keyIdx(isPub, origin, realm);
-  crypto.subtle.exportKey("jwk", key)
-    .then(function(str){
-      ss.storage.keys[idx] = str;
-      dump("\nStored key " + idx);
-    })
-    .catch(function(err){
-      dump("\nstoreKey() Error:" + err);
-    });
-}
-
 // Computes key Index for storage
-function keyIdx(isPub, origin, realm){
+function keyIdx(isPub, origin, realm=""){
   var delim = "!"; // Our delimeter for storage, it's not clear what the character space is for HTTP realms
   if(realm.length == 0){
     realm = " ";
@@ -131,12 +120,12 @@ function keyIdx(isPub, origin, realm){
   }
 }
 
-// Returns key associated with origin
+// Returns key associated with origin 
 // If no key stored returns false
 function getKey(isPub, origin, realm=""){
   var rv = null;
   var idx = keyIdx(isPub, origin, realm);
-  if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){ 
+  if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     return false;
   }
 
@@ -154,6 +143,7 @@ function getKey(isPub, origin, realm=""){
 			  [usage]
 			 )
     .then(function(key){
+      dump("\nImported key");
       rv = key;
     })
     .catch(function(err){
@@ -161,26 +151,27 @@ function getKey(isPub, origin, realm=""){
       return false;
     });
 
-  while(rv === null){ // It shouldn't take too long :)
-    var foo = "bar";
-  }
+  /*
+  while(rv == null){ // It shouldn't take too long :)
+    dump("\nLooping");
+  }*/
   return rv;
   
 }
 
 // Deletes a key from storage
 function delKey(isPub, origin, realm=""){
-  var idx = keyIdx(isPub, origin, realm);
-  ss.storage.keys[idx] = null;
+  ss.storage.keys[keyIdx(isPub, origin, realm)] = null;
 }
 
-// Generate a key async and store it
+// Returns Promise to generate a key async
 // Many thanks to https://github.com/diafygi/webcrypto-examples
-function genTempKey(){
-  delKey(true, "tmp");
-  delKey(false, "tmp");
-    
-  crypto.subtle.generateKey( // See RFC 7486 section 7 for details
+function genNextKey(){
+  dump("\nEntered genNextkey");
+  delKey(true, "next");
+  delKey(false, "next");
+
+  return crypto.subtle.generateKey( // See RFC 7486 section 7 for details
   {
     name: "RSASSA-PKCS1-v1_5",
     modulusLength: 2048,
@@ -189,28 +180,54 @@ function genTempKey(){
   },
     true,
     ["sign", "verify"]
-  )
-    .then(function(keyPair){ // Returns a keypair object
-      storeKey(keyPair.publicKey, true, "tmp");
-      storeKey(keyPair.privateKey, false, "tmp");
-    })
-    .catch(function(err){
-      dump("\ngenKey() Error:" + err);
-    });
+  );
 }
- 
+
+
 /*
   BEGIN EXECUTION
 */
 dump("\nBEGIN EXECUTION");
 
-//resetKeyStorage();
+resetKeyStorage();
 if(! initKeyStorage()){ // Initialize our storage
-  dump("\nGenerating new RSA key and storing it");
-  genTempKey();
+  dump("\nGenerating next RSA key and storing it");
+  Promise.all([genNextKey()])
+    .then(function(res){
+      dump("\nSetting keyPair");
+      keyPair = res[0];
+    });
+  dump("\nGenerated keys, now storing");
+  Promise.all([
+    crypto.subtle.exportKey("jwk", keyPair.publicKey)
+      .then(function(str){
+	ss.storage.keys[keyIdx(true, "next")] = str;
+	dump("\nStored public key");
+      }),
+    crypto.subtle.exportKey("jwk", keyPair.privateKey)
+      .then(function(str){
+	ss.storage.keys[keyIdx(false, "next")] = str;
+	dump("\nStored private key");
+      })])
+  .then(function(){
+    dump("\nInner all resolved!");
+  })
+  .catch(function(err){
+    dump("\nInner Error:" + err);
+  });
 }
 
-//storeKey(getKey(true, "tmp"), true, "tmp");
+dump("\nHow'd we get here?");
+
+/*
+keys['next'] = {};
+keys['next']['pub'] = false;
+keys['next']['pri'] = false;
+while(! keys['next']['pub']){
+  dump("\nGetting key" + keys['next']['pub']);
+
+}
+*/
 
 registerHttp(); // register http request listener
 
