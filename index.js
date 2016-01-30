@@ -9,6 +9,7 @@ Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 // Our dict of keys read into memory
 // It's populated as needed from storage
 var keys = {};
+var initFinished = false; // Set to true once we finish our async startup routine
 
 // Register observer service
 function registerHttp(){
@@ -120,10 +121,15 @@ function keyIdx(isPub, origin, realm=""){
   }
 }
 
-// Returns key associated with origin 
+// Deletes a key from storage
+function delKey(isPub, origin, realm=""){
+  ss.storage.keys[keyIdx(isPub, origin, realm)] = null;
+}
+
+// Returns Promise to return a key associated with origin 
 // If no key stored returns false
 function getKey(isPub, origin, realm=""){
-  var rv = null;
+  dump("\nEntered getKey");
   var idx = keyIdx(isPub, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     return false;
@@ -134,37 +140,17 @@ function getKey(isPub, origin, realm=""){
   }else{
     usage = "sign";
   }
-
-  crypto.subtle.importKey("jwk",
-			  ss.storage.keys[idx],
-			  { name: "RSASSA-PKCS1-v1_5",
-			    hash: {name: "SHA-256"} },
-			  false, 
-			  [usage]
-			 )
-    .then(function(key){
-      dump("\nImported key");
-      rv = key;
-    })
-    .catch(function(err){
-      dump("\nError importing public key:" + err);
-      return false;
-    });
-
-  /*
-  while(rv == null){ // It shouldn't take too long :)
-    dump("\nLooping");
-  }*/
-  return rv;
   
+  return crypto.subtle.importKey("jwk",
+				 ss.storage.keys[idx],
+				 { name: "RSASSA-PKCS1-v1_5",
+				   hash: {name: "SHA-256"} },
+				 false,
+				 [usage]
+				);
 }
 
-// Deletes a key from storage
-function delKey(isPub, origin, realm=""){
-  ss.storage.keys[keyIdx(isPub, origin, realm)] = null;
-}
-
-// Returns Promise to generate a key async
+// Returns Promise to generate a key
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){
   dump("\nEntered genNextkey");
@@ -189,45 +175,77 @@ function genNextKey(){
 */
 dump("\nBEGIN EXECUTION");
 
-resetKeyStorage();
-if(! initKeyStorage()){ // Initialize our storage
+//resetKeyStorage();
+if(! initKeyStorage()){ // Initialize our keys and storage
+
   dump("\nGenerating next RSA key and storing it");
-  Promise.all([genNextKey()])
-    .then(function(res){
-      dump("\nSetting keyPair");
-      keyPair = res[0];
+  genNextKey()
+    .then(function(keyPair){
+      dump("\nkeypair generated");
+
+      Promise.all([
+	crypto.subtle.exportKey("jwk", keyPair.publicKey)
+	  .then(function(str){
+	    ss.storage.keys[keyIdx(true, "next")] = str;
+	    dump("\nStored next public key");
+	  })
+	  .catch(function(err){
+	    dump("\nError storing next public key")
+	  }),
+	crypto.subtle.exportKey("jwk", keyPair.privateKey)
+	  .then(function(str){
+	    ss.storage.keys[keyIdx(false, "next")] = str;
+	    dump("\nStored next private key");
+	  })
+	  .catch(function(err){
+	    dump("\nError storing next private key")
+	  })])
+	.then(function(){
+	  dump("\nStored next keyPair");
+	  keys['next'] = {};
+	  keys['next']['pub'] = keyPair.publicKey;
+	  keys['next']['pri'] = keyPair.privateKey;
+	  initFinished = true;
+	  dump("\nSet mem next keypairs");
+	})
+	.catch(function(err){
+	  dump("\nError storing next keypair:" + err);
+	});
+    })
+    .catch(function(err){
+      dump("\nError running genKey")
     });
-  dump("\nGenerated keys, now storing");
+
+}else{
+  keys['next'] = {};
   Promise.all([
-    crypto.subtle.exportKey("jwk", keyPair.publicKey)
-      .then(function(str){
-	ss.storage.keys[keyIdx(true, "next")] = str;
-	dump("\nStored public key");
+    getKey(true, "next")
+      .then(function(key){ 
+	keys['next']['pub'] = key;
+	dump("\nImported next public key");
+      })
+      .catch(function(err){
+	dump("\nError importing next public key")
       }),
-    crypto.subtle.exportKey("jwk", keyPair.privateKey)
-      .then(function(str){
-	ss.storage.keys[keyIdx(false, "next")] = str;
-	dump("\nStored private key");
+    getKey(false, "next")
+      .then(function(key){
+	keys['next']['pri'] = key;
+	dump("\nImported next private key");
+      })
+      .catch(function(err){
+	dump("\nError importing next private key")
       })])
-  .then(function(){
-    dump("\nInner all resolved!");
-  })
-  .catch(function(err){
-    dump("\nInner Error:" + err);
-  });
+    .then(function(){
+      initFinished = true;
+      dump("\nSet mem keypairs");
+    })
+    .catch(function(err){
+      dump("\nError importing keys:" + err);
+    });
 }
 
 dump("\nHow'd we get here?");
 
-/*
-keys['next'] = {};
-keys['next']['pub'] = false;
-keys['next']['pri'] = false;
-while(! keys['next']['pub']){
-  dump("\nGetting key" + keys['next']['pub']);
-
-}
-*/
 
 registerHttp(); // register http request listener
 
