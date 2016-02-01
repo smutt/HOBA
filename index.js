@@ -3,13 +3,14 @@ var data = require("sdk/self").data;
 var ss = require("sdk/simple-storage");
 let { Cu, Cc, Ci } = require('chrome');
 var menuItem = require("menuitem");
-var hoba =require("./lib/hoba.js"); // HOBA specific libs
+//var hoba = require("./lib/hoba.js"); // HOBA specific functions
+var base64 = require("lib/jsbn/base64.js"); // Some string manipulation functions
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 
 // Our dict of keys read into memory
 // It's populated as needed from storage
 var keys = {};
-var initFinished = false; // Set to true once we finish our async startup routine
+var regInProgress = false; // Are we in the process of registering?
 
 // Register observer service
 function registerHttp(){
@@ -49,17 +50,122 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
-  var origin = hoba.get_origin(aSubject.URI.spec)
-  if(! getKey(origin, realm)){
-    dump("\nNo key")
-    // Make new key
+  var origin = getOrigin(aSubject.URI.spec)
+  privateKey = getKey(false, origin, realm);
+  if(! privateKey){ // We have no key for this origin/realm
+    dump("\nInitiating new registration for origin:" + origin + " realm:");
+    regInProgress = true;
+    crypto.subtle.exportKey("spki", keys['next']['pub'])
+      .then(function(spki){
+	dump("\nSPKI:" + spki);
+	var pem = spkiToPem(spki);
+	dump("\nPEM:" + pem);
+	var req = new XMLHttpRequest();
+	req.open("POST", origin + ".well-known/hoba/register", true);
+	req.onreadystatechange = regCallback;
+	req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+
+        var authres=hoba_make_auth_header();
+        regreq.setRequestHeader("Authorization","HOBA "+authres);
+        regreq.send(regparams);
+
+
+
+      })
+      .catch(function(err){
+	dump("\nError generating registration SPKI for " + origin + " " + realm + " " + err);
+      });
   }else{
-    dump("\nKey present")
-    // Do a post to some URI
+    // Login
+
   }
 
   //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
+  dump("\nEnd of handleHttpReq()");
+}
 
+// Callback function for the registration HTTP POST 
+// Not yet written, code from Stephen
+function regCallback(){
+  if (regreq.readyState == 4 && regreq.status == 200) {                
+    hobatext(regreq.responseText);
+    privstruct.state="regok";
+    privstruct.time=new Date();
+    hoba_put_key(privstruct.origin,privstruct,privstruct.alg);
+  } else if (regreq.readyState == 4 && regreq.status >= 400) {                
+    privstruct.state="reginwork";
+    privstruct.time=new Date();
+    hoba_put_key(privstruct.origin,privstruct,privstruct.alg);
+    hobatext(regreq.responseText);
+  }
+}
+
+// Takes public key in SPKI format
+// Returns PEM format
+// Much of this was copied from Stephen Farrell's implementation
+function spkiToPem(spki){
+  var prefix = "-----BEGIN PUBLIC KEY-----%0D%0A";
+  var postfix = "%0D%0A-----END PUBLIC KEY-----";
+  var pem = add0D0As(urlb64(base64.hex2b64(spki)));
+  return prefix + pem + postfix;
+}
+
+// Do some important conversion for spkiToPem
+// Copied from Stephen Farrell's HOBA implementation
+function urlb64(instr){
+  var rv=""; 
+  for(i = 0; i < instr.length; ++i){
+    if(instr[i] == '+'){
+      rv += '-';
+    }else if(instr[i] == '/'){
+      rv += '_';
+    }else{
+      rv += instr[i];
+    }
+  }
+  return(rv);
+}
+
+// Add line breaks every 64 chars
+// Copied from Stephen Farrell's HOBA implementation
+function add0D0As(str){
+  var rv = "";
+  for (i=0; i != str.length; i++){
+    rv += str[i];
+    if(i && ((i%64) == 0)){
+      rv += "%0D%0A";
+    }
+  }
+  return rv;
+}
+
+// Takes a URL
+// Returns web origin as scheme:auth:port without slashes
+function getOrigin(uri){
+  return getTbsOrigin(uri).replace("://", ":");
+}
+
+// Takes a URL
+// Returns web origin as scheme://auth:port with slashes
+function getTbsOrigin(uri){
+  var proto = uri.split("://")[0];
+  var right = uri.split("://")[1];
+  
+  if(right.indexOf(":") == -1){
+    if(proto == "http"){
+      var port = ":80";
+    }else if(proto == "https"){
+      var port = ":443";
+    }else{
+      var port = ":80";
+    }
+    var host = right.split("/")[0];
+  }else{
+    var host = right.split(":")[0];
+    var port = ":" + right.split(":")[1].split("/")[0];
+  }
+  
+  return proto + "://" + host + port;
 }
 
 var menuItem = menuItem.Menuitem({
@@ -126,10 +232,16 @@ function delKey(isPub, origin, realm=""){
   ss.storage.keys[keyIdx(isPub, origin, realm)] = null;
 }
 
+// Takes a string to 
+// Adds a string key to local storage
+function addKey(str, isPub, origin, realm=""){
+  ss.storage.keys[keyIdx(isPub, origin, realm)] = str;
+}
+
 // Returns Promise to return a key associated with origin 
 // If no key stored returns false
 function getKey(isPub, origin, realm=""){
-  dump("\nEntered getKey");
+  dump("\nEntered getKey isPub:" + isPub + " origin:" + origin);
   var idx = keyIdx(isPub, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     return false;
@@ -145,11 +257,11 @@ function getKey(isPub, origin, realm=""){
 				 ss.storage.keys[idx],
 				 { name: "RSASSA-PKCS1-v1_5",
 				   hash: {name: "SHA-256"} },
-				 false,
+				 true,
 				 [usage]
 				);
 }
-
+  
 // Returns Promise to generate a key
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){
@@ -181,32 +293,28 @@ if(! initKeyStorage()){ // Initialize our keys and storage
   dump("\nGenerating next RSA key and storing it");
   genNextKey()
     .then(function(keyPair){
-      dump("\nkeypair generated");
-
       Promise.all([
 	crypto.subtle.exportKey("jwk", keyPair.publicKey)
 	  .then(function(str){
+	    addKey(str, true, "next");
 	    ss.storage.keys[keyIdx(true, "next")] = str;
-	    dump("\nStored next public key");
 	  })
 	  .catch(function(err){
 	    dump("\nError storing next public key")
 	  }),
 	crypto.subtle.exportKey("jwk", keyPair.privateKey)
 	  .then(function(str){
-	    ss.storage.keys[keyIdx(false, "next")] = str;
-	    dump("\nStored next private key");
+	    addKey(str, false, "next");
 	  })
 	  .catch(function(err){
 	    dump("\nError storing next private key")
 	  })])
 	.then(function(){
-	  dump("\nStored next keyPair");
+	  // Set our volatile copy of next-key
 	  keys['next'] = {};
 	  keys['next']['pub'] = keyPair.publicKey;
 	  keys['next']['pri'] = keyPair.privateKey;
-	  initFinished = true;
-	  dump("\nSet mem next keypairs");
+	  registerHttp(); // register http request listener
 	})
 	.catch(function(err){
 	  dump("\nError storing next keypair:" + err);
@@ -222,7 +330,6 @@ if(! initKeyStorage()){ // Initialize our keys and storage
     getKey(true, "next")
       .then(function(key){ 
 	keys['next']['pub'] = key;
-	dump("\nImported next public key");
       })
       .catch(function(err){
 	dump("\nError importing next public key")
@@ -230,22 +337,15 @@ if(! initKeyStorage()){ // Initialize our keys and storage
     getKey(false, "next")
       .then(function(key){
 	keys['next']['pri'] = key;
-	dump("\nImported next private key");
       })
       .catch(function(err){
 	dump("\nError importing next private key")
       })])
     .then(function(){
-      initFinished = true;
-      dump("\nSet mem keypairs");
+      registerHttp(); // register http request listener
     })
     .catch(function(err){
       dump("\nError importing keys:" + err);
     });
 }
-
-dump("\nHow'd we get here?");
-
-
-registerHttp(); // register http request listener
 
