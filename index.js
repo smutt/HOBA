@@ -4,13 +4,16 @@ var ss = require("sdk/simple-storage");
 let { Cu, Cc, Ci } = require('chrome');
 var menuItem = require("menuitem");
 //var hoba = require("./lib/hoba.js"); // HOBA specific functions
-var base64 = require("lib/jsbn/base64.js"); // Some string manipulation functions
+//var base64 = require("lib/jsbn/base64.js"); // Some string manipulation functions
+//var jwkToPem = require("jwk-to-pem");
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
+Cu.importGlobalProperties(["WindowBase64"]); // Bring in our base64 conversion functions
 
-// Our dict of keys read into memory
-// It's populated as needed from storage
-var keys = {};
-var regInProgress = false; // Are we in the process of registering?
+// Some global variables
+var keys = {}; // Our dict of keys read into memory
+var regInWork = false; // Are we in the process of registering?
+var kid = "1"; // For now we just always use 1 for key-id
+var alg = "1"; // Not sure what should be here :(
 
 // Register observer service
 function registerHttp(){
@@ -39,6 +42,15 @@ function handleHttpReq(aSubject, aTopic, aData){
   var chal = authChallenge.match(/challenge=(.*?),/)[1]
   dump("\nchal:" + chal)
 
+  // Are we finishing up an earlier registration
+  var hobaReg = aSubject.getResponseHeader("Hobareg");
+  if(authChallenge == "regok" && regInWork === true){
+    regInWork = false;
+    addKey(keys['reginwork']['pub'], true, keys['reginwork']['origin'], keys['reginwork']['realm']);
+    addKey(keys['reginwork']['pri'], false, keys['reginwork']['origin'], keys['reginwork']['realm']);
+    keys['reginwork'] = {};
+  }
+  
   if(authChallenge.search("realm=") == -1){
     var realm = "";
   }else{
@@ -50,93 +62,77 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
-  var origin = getOrigin(aSubject.URI.spec)
+  var origin = getOrigin(aSubject.URI.spec);
+  var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
   privateKey = getKey(false, origin, realm);
-  if(! privateKey){ // We have no key for this origin/realm
+  if(! privateKey){ // We have no key for this origin/realm, begin registration
     dump("\nInitiating new registration for origin:" + origin + " realm:");
-    regInProgress = true;
-    crypto.subtle.exportKey("spki", keys['next']['pub'])
-      .then(function(spki){
-	dump("\nSPKI:" + spki);
-	var pem = spkiToPem(spki);
-	dump("\nPEM:" + pem);
+    regInWork = true;
+    crypto.subtle.exportKey("jwk", keys['next']['pub'])
+      .then(function(jwk){
 	var req = new XMLHttpRequest();
 	req.open("POST", origin + ".well-known/hoba/register", true);
-	req.onreadystatechange = regCallback;
 	req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+	req.onreadystatechange = function (){ // We currently don't deal with failures
+	  if(req.readyState !== XMLHttpRequest.DONE){ return; }
+	  var hobaReg = aSubject.getResponseHeader("Hobareg");
+	  if(hobaReg == "regok"){
+	    regInWork = false;
+	    addKey(keys['next']['pub'], true, origin, realm);
+	    addKey(keys['next']['pri'], false, origin, realm);
+	  }else{ // HTTP POST returned but registration not done yet
+	    keys['reginwork'] = {};
+	    keys['reginwork']['pub'] = keys['next']['pub'];
+	    keys['reginwork']['pri'] = keys['next']['pri'];
+	    keys['reginwork']['origin'] = origin;
+	    keys['reginwork']['realm'] = realm;
+	  }
 
-        var authres=hoba_make_auth_header();
-        regreq.setRequestHeader("Authorization","HOBA "+authres);
-        regreq.send(regparams);
+	  unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
+	  genNextKey()
+	    .then(function(){
+	      registerHttp();
+	    })
+	    .catch(function(err){
+	      dump("\nError generating new key after successful reg" + err);
+	    });
+	};
 
-
-
+	var rands = new Uint32Array(1);
+	crypto.getRandomValues(rands);
+	var nonce = rands[0].toString();
+	if(nonce.charAt(nonce.length-1) == "="){
+          nonce = nonce.substring(0, nonce.length-1);
+        }
+	var tbsBlob = nonce.length().toString() + ":" + nonce;
+	tbsBlob += alg.length().toString() + ":" + alg;
+	tbsBlob += tbsOrigin.length().toString() + ":" + tbsOrigin;
+	tbsBlob += realm.length().toString() + ":" + realm;
+	tbsBlob += kid.length().toString() + ":" + kid;
+	tbsBlob += chal.length().toString() + ":" + chal;
+	crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, keys['next']['pri'], tbsBlob)
+	  .then(function(tbsOut){
+	    var kid = b64ToUrlb64(WindowBase64.btoa(kid));
+	    var nonce = b64ToUrlb64(WindowBase64.btoa(nonce));
+	    var sig = b64ToUrlb64(WindowBase64.btoa(tbsOut));
+	    var authHeader = kid + "." + chal + "." + nonce + "." + sig;
+            req.setRequestHeader("Authorization","HOBA " + authHeader);
+	    req.send(jwk); // For sure not right
+	  })
+	  .catch(function(err){
+	    dump("\nError generating TBS signature for " + origin);
+	  });
       })
       .catch(function(err){
 	dump("\nError generating registration SPKI for " + origin + " " + realm + " " + err);
       });
-  }else{
-    // Login
+  }else{ // We have a key for this origin, begin login
+
 
   }
 
   //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
   dump("\nEnd of handleHttpReq()");
-}
-
-// Callback function for the registration HTTP POST 
-// Not yet written, code from Stephen
-function regCallback(){
-  if (regreq.readyState == 4 && regreq.status == 200) {                
-    hobatext(regreq.responseText);
-    privstruct.state="regok";
-    privstruct.time=new Date();
-    hoba_put_key(privstruct.origin,privstruct,privstruct.alg);
-  } else if (regreq.readyState == 4 && regreq.status >= 400) {                
-    privstruct.state="reginwork";
-    privstruct.time=new Date();
-    hoba_put_key(privstruct.origin,privstruct,privstruct.alg);
-    hobatext(regreq.responseText);
-  }
-}
-
-// Takes public key in SPKI format
-// Returns PEM format
-// Much of this was copied from Stephen Farrell's implementation
-function spkiToPem(spki){
-  var prefix = "-----BEGIN PUBLIC KEY-----%0D%0A";
-  var postfix = "%0D%0A-----END PUBLIC KEY-----";
-  var pem = add0D0As(urlb64(base64.hex2b64(spki)));
-  return prefix + pem + postfix;
-}
-
-// Do some important conversion for spkiToPem
-// Copied from Stephen Farrell's HOBA implementation
-function urlb64(instr){
-  var rv=""; 
-  for(i = 0; i < instr.length; ++i){
-    if(instr[i] == '+'){
-      rv += '-';
-    }else if(instr[i] == '/'){
-      rv += '_';
-    }else{
-      rv += instr[i];
-    }
-  }
-  return(rv);
-}
-
-// Add line breaks every 64 chars
-// Copied from Stephen Farrell's HOBA implementation
-function add0D0As(str){
-  var rv = "";
-  for (i=0; i != str.length; i++){
-    rv += str[i];
-    if(i && ((i%64) == 0)){
-      rv += "%0D%0A";
-    }
-  }
-  return rv;
 }
 
 // Takes a URL
@@ -164,9 +160,28 @@ function getTbsOrigin(uri){
     var host = right.split(":")[0];
     var port = ":" + right.split(":")[1].split("/")[0];
   }
-  
   return proto + "://" + host + port;
 }
+
+// Takes a base64 encoded string
+// Returns a base64url encoded string
+function b64ToUrlb64(str){
+  var rv = "";
+  for(ii = 0; ii < str.length; ++ii){
+    if (str[ii] == '+'){
+	rv += '-';
+    }else if(str[ii] == '/'){
+      rv += '_';
+    } else {
+      rv += str[ii];
+    }
+  }
+  return rv;
+}
+
+
+
+
 
 var menuItem = menuItem.Menuitem({
   id: "clickme",
@@ -239,6 +254,7 @@ function addKey(str, isPub, origin, realm=""){
 }
 
 // Returns Promise to return a key associated with origin 
+// from non-volatile storage
 // If no key stored returns false
 function getKey(isPub, origin, realm=""){
   dump("\nEntered getKey isPub:" + isPub + " origin:" + origin);
