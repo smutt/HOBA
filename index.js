@@ -4,16 +4,17 @@ var ss = require("sdk/simple-storage");
 let { Cu, Cc, Ci } = require('chrome');
 var menuItem = require("menuitem");
 //var hoba = require("./lib/hoba.js"); // HOBA specific functions
-//var base64 = require("lib/jsbn/base64.js"); // Some string manipulation functions
 //var jwkToPem = require("jwk-to-pem");
+var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
-Cu.importGlobalProperties(["WindowBase64"]); // Bring in our base64 conversion functions
+Cu.importGlobalProperties(["atob", "btoa"]); // Bring in our base64 conversion functions
+Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 // Some global variables
 var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
-var kid = "1"; // For now we just always use 1 for key-id
 var alg = "1"; // Not sure what should be here :(
+var did = "firefox_hoba"; // Our arbitrary device ID
 
 // Register observer service
 function registerHttp(){
@@ -37,18 +38,24 @@ function handleHttpReq(aSubject, aTopic, aData){
   aSubject.QueryInterface(Ci.nsIHttpChannel);
 
   // Is there auth, and is it HOBA?
+  // For now we don't worry about challenge timeout
   var authChallenge = aSubject.getResponseHeader("WWW-Authenticate");
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
-  var chal = authChallenge.match(/challenge=(.*?),/)[1]
-  dump("\nchal:" + chal)
+  var chal = authChallenge.match(/challenge=(.*?),/)[1];
+  dump("\nchal:" + chal);
 
-  // Are we finishing up an earlier registration
-  var hobaReg = aSubject.getResponseHeader("Hobareg");
-  if(authChallenge == "regok" && regInWork === true){
-    regInWork = false;
-    addKey(keys['reginwork']['pub'], true, keys['reginwork']['origin'], keys['reginwork']['realm']);
-    addKey(keys['reginwork']['pri'], false, keys['reginwork']['origin'], keys['reginwork']['realm']);
-    keys['reginwork'] = {};
+  // Are we finishing up an earlier registration?
+  var hobaReg = null;
+//  var hobaReg = aSubject.getResponseHeader("Hobareg");
+  dump("\nWe got here");
+  if(hobaReg != null){
+    if(hobaReg == "regok" && regInWork === true){
+      dump("\nHobareg:" + hobaReg);
+      regInWork = false;
+      addKey(keys['reginwork']['pub'], true, keys['reginwork']['origin'], keys['reginwork']['realm']);
+      addKey(keys['reginwork']['pri'], false, keys['reginwork']['origin'], keys['reginwork']['realm']);
+      keys['reginwork'] = {};
+    }
   }
   
   if(authChallenge.search("realm=") == -1){
@@ -67,13 +74,15 @@ function handleHttpReq(aSubject, aTopic, aData){
   privateKey = getKey(false, origin, realm);
   if(! privateKey){ // We have no key for this origin/realm, begin registration
     dump("\nInitiating new registration for origin:" + origin + " realm:");
-    regInWork = true;
+    regInWork = true;    
+    dump("\nCryptoKeyType==" + keys['next']['pub'].type);
     crypto.subtle.exportKey("jwk", keys['next']['pub'])
       .then(function(jwk){
 	var req = new XMLHttpRequest();
-	req.open("POST", origin + ".well-known/hoba/register", true);
+	dump("\nPOST URI:" + tbsOrigin + "/.well-known/hoba/register");
+	req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
 	req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-	req.onreadystatechange = function (){ // We currently don't deal with failures
+	req.onreadystatechange = function (){ // We currently don't deal with failures at all
 	  if(req.readyState !== XMLHttpRequest.DONE){ return; }
 	  var hobaReg = aSubject.getResponseHeader("Hobareg");
 	  if(hobaReg == "regok"){
@@ -94,45 +103,55 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      registerHttp();
 	    })
 	    .catch(function(err){
-	      dump("\nError generating new key after successful reg" + err);
+	      dump("\nError generating next key after reg" + err);
 	    });
 	};
 
-	var rands = new Uint32Array(1);
-	crypto.getRandomValues(rands);
-	var nonce = rands[0].toString();
-	if(nonce.charAt(nonce.length-1) == "="){
-          nonce = nonce.substring(0, nonce.length-1);
-        }
-	var tbsBlob = nonce.length().toString() + ":" + nonce;
-	tbsBlob += alg.length().toString() + ":" + alg;
-	tbsBlob += tbsOrigin.length().toString() + ":" + tbsOrigin;
-	tbsBlob += realm.length().toString() + ":" + realm;
-	tbsBlob += kid.length().toString() + ":" + kid;
-	tbsBlob += chal.length().toString() + ":" + chal;
-	crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, keys['next']['pri'], tbsBlob)
+	var kid = sha256.hash(jwk);
+	genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
 	  .then(function(tbsOut){
-	    var kid = b64ToUrlb64(WindowBase64.btoa(kid));
-	    var nonce = b64ToUrlb64(WindowBase64.btoa(nonce));
-	    var sig = b64ToUrlb64(WindowBase64.btoa(tbsOut));
+	    var kid = b64ToUrlb64(window.btoa(kid));
+	    var nonce = b64ToUrlb64(window.btoa(nonce));
+	    var sig = b64ToUrlb64(window.btoa(tbsOut));
 	    var authHeader = kid + "." + chal + "." + nonce + "." + sig;
-            req.setRequestHeader("Authorization","HOBA " + authHeader);
-	    req.send(jwk); // For sure not right
+            req.setRequestHeader("Authorization","HOBA result=" + authHeader);
+
+	    var postData = "pub=" + b64ToUrlb64(window.btoa(jwk));
+	    postData += "&kidtype=2&kid=" + kid; // We always use kidtype==2
+	    postData += "&didtype=0&did=" + did;
+	    req.send(postData);
 	  })
 	  .catch(function(err){
 	    dump("\nError generating TBS signature for " + origin);
 	  });
       })
       .catch(function(err){
-	dump("\nError generating registration SPKI for " + origin + " " + realm + " " + err);
+	dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
       });
   }else{ // We have a key for this origin, begin login
-
-
+    return false;
   }
 
-  //  dump("\ncookie:" + req.getResponseHeader("Set-Cookie"));
   dump("\nEnd of handleHttpReq()");
+}
+
+// Takes a key obj, an HTTP Auth challenge, key-id, algorithm-id, http-origin and realm
+// Returns Promise that returns signature of HOBA TBS-blob
+function genSignedTbsBlob(privKey, chal, kid, alg, origin, realm){
+  var rands = new Uint32Array(1);
+  crypto.getRandomValues(rands);
+  var nonce = rands[0].toString();
+  if(nonce.charAt(nonce.length-1) == "="){
+    nonce = nonce.substring(0, nonce.length-1);
+  }
+  var tbsBlob = nonce.length().toString() + ":" + nonce;
+  tbsBlob += alg.length().toString() + ":" + alg;
+  tbsBlob += origin.length().toString() + ":" + origin;
+  tbsBlob += realm.length().toString() + ":" + realm;
+  tbsBlob += kid.length().toString() + ":" + kid;
+  tbsBlob += chal.length().toString() + ":" + chal;
+
+  return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, tbsBlob);
 }
 
 // Takes a URL
@@ -178,9 +197,6 @@ function b64ToUrlb64(str){
   }
   return rv;
 }
-
-
-
 
 
 var menuItem = menuItem.Menuitem({
@@ -235,6 +251,8 @@ function keyIdx(isPub, origin, realm=""){
   if(realm.length == 0){
     realm = " ";
   }
+
+  var origin = origin.replace(":", "_"); // Would rather not use colons in keys
   if(isPub){
     return origin + delim + realm + delim + "pub";
   }else{
@@ -248,7 +266,7 @@ function delKey(isPub, origin, realm=""){
 }
 
 // Takes a string to 
-// Adds a string key to local storage
+// Adds a string key to local non-volatile storage
 function addKey(str, isPub, origin, realm=""){
   ss.storage.keys[keyIdx(isPub, origin, realm)] = str;
 }
@@ -296,7 +314,6 @@ function genNextKey(){
     ["sign", "verify"]
   );
 }
-
 
 /*
   BEGIN EXECUTION
