@@ -46,9 +46,8 @@ function handleHttpReq(aSubject, aTopic, aData){
 
   // Are we finishing up an earlier registration?
   var hobaReg = null;
-//  var hobaReg = aSubject.getResponseHeader("Hobareg");
-  dump("\nWe got here");
-  if(hobaReg != null){
+//  var hobaReg = aSubject.getResponseHeader("Hobareg"); // This just does not work for some reason
+  if(hobaReg !== null){
     if(hobaReg == "regok" && regInWork === true){
       dump("\nHobareg:" + hobaReg);
       regInWork = false;
@@ -71,67 +70,76 @@ function handleHttpReq(aSubject, aTopic, aData){
 
   var origin = getOrigin(aSubject.URI.spec);
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
-  privateKey = getKey(false, origin, realm);
-  if(! privateKey){ // We have no key for this origin/realm, begin registration
-    dump("\nInitiating new registration for origin:" + origin + " realm:");
-    regInWork = true;    
-    dump("\nCryptoKeyType==" + keys['next']['pub'].type);
-    crypto.subtle.exportKey("jwk", keys['next']['pub'])
-      .then(function(jwk){
-	var req = new XMLHttpRequest();
-	dump("\nPOST URI:" + tbsOrigin + "/.well-known/hoba/register");
-	req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
-	req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-	req.onreadystatechange = function (){ // We currently don't deal with failures at all
-	  if(req.readyState !== XMLHttpRequest.DONE){ return; }
-	  var hobaReg = aSubject.getResponseHeader("Hobareg");
-	  if(hobaReg == "regok"){
-	    regInWork = false;
-	    addKey(keys['next']['pub'], true, origin, realm);
-	    addKey(keys['next']['pri'], false, origin, realm);
-	  }else{ // HTTP POST returned but registration not done yet
-	    keys['reginwork'] = {};
-	    keys['reginwork']['pub'] = keys['next']['pub'];
-	    keys['reginwork']['pri'] = keys['next']['pri'];
-	    keys['reginwork']['origin'] = origin;
-	    keys['reginwork']['realm'] = realm;
-	  }
-
-	  unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
-	  genNextKey()
-	    .then(function(){
-	      registerHttp();
-	    })
-	    .catch(function(err){
-	      dump("\nError generating next key after reg" + err);
-	    });
-	};
-
-	var kid = sha256.hash(jwk);
-	genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
-	  .then(function(tbsOut){
-	    var kid = b64ToUrlb64(window.btoa(kid));
-	    var nonce = b64ToUrlb64(window.btoa(nonce));
-	    var sig = b64ToUrlb64(window.btoa(tbsOut));
-	    var authHeader = kid + "." + chal + "." + nonce + "." + sig;
-            req.setRequestHeader("Authorization","HOBA result=" + authHeader);
-
-	    var postData = "pub=" + b64ToUrlb64(window.btoa(jwk));
-	    postData += "&kidtype=2&kid=" + kid; // We always use kidtype==2
-	    postData += "&didtype=0&did=" + did;
-	    req.send(postData);
+  getKey(false, origin, realm)
+    .then(function(privateKey){
+      if(privateKey === false){ // We have no key for this origin/realm, begin registration
+	dump("\nInitiating new registration for origin:" + origin + " realm:");
+	regInWork = true;    
+	crypto.subtle.exportKey("jwk", keys['next']['pub'])
+	  .then(function(jwkObj){
+	    jwk = JSON.stringify(jwkObj);
+	    var kid = sha256.hash(jwk);
+	    dump("\nkid:" + kid);
+	    
+	    var req = new XMLHttpRequest();
+	    dump("\nRegister URI:" + tbsOrigin + "/.well-known/hoba/register");
+	    req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
+	    req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
+	      if(req.readyState !== XMLHttpRequest.DONE){ return; }
+	      var hobaReg = aSubject.getResponseHeader("Hobareg");
+	      if(hobaReg == "regok"){
+		regInWork = false;
+		addKey(keys['next']['pub'], true, origin, realm);
+		addKey(keys['next']['pri'], false, origin, realm);
+	      }else{ // HTTP POST returned but registration not done yet
+		keys['reginwork'] = {};
+		keys['reginwork']['pub'] = keys['next']['pub'];
+		keys['reginwork']['pri'] = keys['next']['pri'];
+		keys['reginwork']['origin'] = origin;
+		keys['reginwork']['realm'] = realm;
+	      }
+	      
+	      unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
+	      genNextKey()
+		.then(function(){
+		  registerHttp();
+		})
+		.catch(function(err){
+		  dump("\nError generating next key after reg" + err);
+		});
+	    };
+	    
+	    genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
+	      .then(function(tbsSig){
+		dump("\ntbsOut:" + tbsSig[0]);
+		var kid = b64ToUrlb64(btoa(kid));
+		var nonce = b64ToUrlb64(btoa(nonce));
+		var sig = b64ToUrlb64(btoa(tbsSig));
+		var authHeader = kid + "." + chal + "." + nonce + "." + sig;
+		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
+		
+		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
+		postData += "&kidtype=2&kid=" + kid; // We always use kidtype==2
+		postData += "&didtype=0&did=" + did;
+		dump("\npostData:" + postData);
+		req.send(postData);
+	      })
+	      .catch(function(err){
+		dump("\nError generating TBS signature for " + origin);
+	      });
 	  })
 	  .catch(function(err){
-	    dump("\nError generating TBS signature for " + origin);
+	    dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
 	  });
-      })
-      .catch(function(err){
-	dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
-      });
-  }else{ // We have a key for this origin, begin login
-    return false;
-  }
-
+      }else{ // We have a key for this origin, begin login
+	return false;
+      }
+    })
+    .catch(function(err){
+      dump("\nError getting privateKey for " + origin);
+    })
+  
   dump("\nEnd of handleHttpReq()");
 }
 
@@ -141,16 +149,20 @@ function genSignedTbsBlob(privKey, chal, kid, alg, origin, realm){
   var rands = new Uint32Array(1);
   crypto.getRandomValues(rands);
   var nonce = rands[0].toString();
-  if(nonce.charAt(nonce.length-1) == "="){
+  if(nonce.charAt(nonce.length - 1) == "="){
     nonce = nonce.substring(0, nonce.length-1);
   }
-  var tbsBlob = nonce.length().toString() + ":" + nonce;
-  tbsBlob += alg.length().toString() + ":" + alg;
-  tbsBlob += origin.length().toString() + ":" + origin;
-  tbsBlob += realm.length().toString() + ":" + realm;
-  tbsBlob += kid.length().toString() + ":" + kid;
-  tbsBlob += chal.length().toString() + ":" + chal;
+  var tbsStr = nonce.length.toString() + ":" + nonce;
+  tbsStr += alg.length.toString() + ":" + alg;
+  tbsStr += origin.length.toString() + ":" + origin;
+  tbsStr += realm.length.toString() + ":" + realm;
+  tbsStr += kid.length.toString() + ":" + kid;
+  tbsStr += chal.length.toString() + ":" + chal;
+  dump("\ntbsStr == " + tbsStr);
 
+  var tbsBlob = new ArrayBuffer(1);
+  //  tbsBlob[0] = btoa(tbsStr);
+  tbsBlob[0] = tbsStr;
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, tbsBlob);
 }
 
@@ -273,12 +285,12 @@ function addKey(str, isPub, origin, realm=""){
 
 // Returns Promise to return a key associated with origin 
 // from non-volatile storage
-// If no key stored returns false
+// If no key stored returns a Promise that resolves to false
 function getKey(isPub, origin, realm=""){
   dump("\nEntered getKey isPub:" + isPub + " origin:" + origin);
   var idx = keyIdx(isPub, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
-    return false;
+    return Promise.resolve(false);
   }
 
   if(isPub){
@@ -322,12 +334,15 @@ dump("\nBEGIN EXECUTION");
 
 //resetKeyStorage();
 if(! initKeyStorage()){ // Initialize our keys and storage
-
   dump("\nGenerating next RSA key and storing it");
   genNextKey()
     .then(function(keyPair){
-      Promise.all([
-	crypto.subtle.exportKey("jwk", keyPair.publicKey)
+      keys['next'] = {}; // Set our volatile copy of next-key
+      keys['next']['pub'] = keyPair.publicKey;
+      keys['next']['pri'] = keyPair.privateKey;
+
+      Promise.all([ // Export pub and pri to non-volatile local storage
+	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(str){
 	    addKey(str, true, "next");
 	    ss.storage.keys[keyIdx(true, "next")] = str;
@@ -335,7 +350,7 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	  .catch(function(err){
 	    dump("\nError storing next public key")
 	  }),
-	crypto.subtle.exportKey("jwk", keyPair.privateKey)
+	crypto.subtle.exportKey("jwk", keys['next']['pri'])
 	  .then(function(str){
 	    addKey(str, false, "next");
 	  })
@@ -343,10 +358,6 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	    dump("\nError storing next private key")
 	  })])
 	.then(function(){
-	  // Set our volatile copy of next-key
-	  keys['next'] = {};
-	  keys['next']['pub'] = keyPair.publicKey;
-	  keys['next']['pri'] = keyPair.privateKey;
 	  registerHttp(); // register http request listener
 	})
 	.catch(function(err){
@@ -357,7 +368,7 @@ if(! initKeyStorage()){ // Initialize our keys and storage
       dump("\nError running genKey")
     });
 
-}else{
+}else{ // NV key storage exists, read next-key from NV to V storage
   keys['next'] = {};
   Promise.all([
     getKey(true, "next")
