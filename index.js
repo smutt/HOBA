@@ -51,8 +51,8 @@ function handleHttpReq(aSubject, aTopic, aData){
     if(hobaReg == "regok" && regInWork === true){
       dump("\nHobareg:" + hobaReg);
       regInWork = false;
-      addKey(keys['reginwork']['pub'], true, keys['reginwork']['origin'], keys['reginwork']['realm']);
-      addKey(keys['reginwork']['pri'], false, keys['reginwork']['origin'], keys['reginwork']['realm']);
+      addKey(keys['reginwork']['pub'], "pub", keys['reginwork']['origin'], keys['reginwork']['realm']);
+      addKey(keys['reginwork']['pri'], "pri", keys['reginwork']['origin'], keys['reginwork']['realm']);
       keys['reginwork'] = {};
     }
   }
@@ -90,6 +90,31 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      var hobaReg = aSubject.getResponseHeader("Hobareg");
 	      if(hobaReg == "regok"){
 		regInWork = false;
+
+		Promise.all([ // Export pub and pri to non-volatile local storage
+		  crypto.subtle.exportKey("jwk", keys['next']['pub'])
+		    .then(function(str){
+		      addKey(str, "pub", "next");
+		    })
+		    .catch(function(err){
+		      dump("\nError storing next public key")
+		    }),
+		  crypto.subtle.exportKey("jwk", keys['next']['pri'])
+		    .then(function(str){
+		      addKey(str, "pri", "next");
+		    })
+		    .catch(function(err){
+		      dump("\nError storing next private key")
+		    })])
+		  .then(function(){
+		    registerHttp(); // register http request listener
+		  })
+		  .catch(function(err){
+		    dump("\nError storing next keypair:" + err);
+		  });
+
+
+
 		addKey(keys['next']['pub'], true, origin, realm);
 		addKey(keys['next']['pri'], false, origin, realm);
 	      }else{ // HTTP POST returned but registration not done yet
@@ -133,13 +158,51 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
 	  });
       }else{ // We have a key for this origin, begin login
-	return false;
+	getKey(true, origin, realm)
+	  .then(function(publicKey){
+	    crypto.subtle.exportKey("jwk", publicKey)
+	      .then(function(jwkObj){
+		jwk = JSON.stringify(jwkObj);
+		var kid = sha256.hash(jwk);
+		dump("\nkid:" + kid);
+
+		var req = new XMLHttpRequest();
+		dump("\nLogin URI:" + tbsOrigin + "/.well-known/hoba/login");
+		req.open("POST", tbsOrigin + "/.well-known/hoba/login", true);
+		req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+		req.onreadystatechange = function (){ // We currently don't really do anything here
+		  if(req.readyState !== XMLHttpRequest.DONE){ return; }
+		  if(req.status == 403){ // Auth failed
+		    return;
+		  }else{ // Auth success
+		    return;
+		  }
+		}
+		  
+		genSignedTbsBlob(privateKey, chal, kid, alg, tbsOrigin, realm)
+		  .then(function(tbsSig){
+		    dump("\ntbsOut:" + tbsSig[0]);
+		    var kid = b64ToUrlb64(btoa(kid));
+		    var nonce = b64ToUrlb64(btoa(nonce));
+		    var sig = b64ToUrlb64(btoa(tbsSig));
+		    var authHeader = kid + "." + chal + "." + nonce + "." + sig;
+		    req.setRequestHeader("Authorization","HOBA result=" + authHeader);
+		    req.send();
+		  })
+		  .catch(function(err){
+		    dump("\nError generating TBS signature for " + origin);
+		  })});
+	      .catch(function(err){
+		dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
+	      })});
+	  .catch(function(err){
+	    dump("\nError getting publicKey for " + origin);
+	  });
       }
     })
     .catch(function(err){
       dump("\nError getting privateKey for " + origin);
-    })
-  
+    });
   dump("\nEnd of handleHttpReq()");
 }
 
@@ -210,7 +273,6 @@ function b64ToUrlb64(str){
   return rv;
 }
 
-
 var menuItem = menuItem.Menuitem({
   id: "clickme",
   menuid: "menu_ToolsPopup",
@@ -241,7 +303,7 @@ function showCfgPanel(state) {
 // Otherwise return True
 // For now this does not persist across restarts
 function initKeyStorage(){
-  if(! ss.storage.keys_exists){
+  if(! ss.storage.keys_exists || ss.storage.keys_exists === null || ss.storage.keys_exists == undefined){
     resetKeyStorage();
     ss.storage.keys_exists = true;
     ss.storage.keys = {};
@@ -251,49 +313,65 @@ function initKeyStorage(){
   }
 }
 
-// Clobbers key storage
+// Resets V and NV key storage
 function resetKeyStorage(){
+  keys = {}
   ss.storage.keys = null
   ss.storage.keys_exists = false;
 }
-
-// Computes key Index for storage
-function keyIdx(isPub, origin, realm=""){
-  var delim = "!"; // Our delimeter for storage, it's not clear what the character space is for HTTP realms
+  
+// Computes key Index for local non-volatile(NV) storage, simple-storage
+// Takes a postFix, origin and realm
+// postFix is usually "pub" or "pri"
+function nvIdx(postFix, origin, realm=""){
+  var delim = "!"; // Our delimeter for NV storage, it's not clear what the character space is for HTTP realms
   if(realm.length == 0){
     realm = " ";
   }
 
+  var origin = origin.replace(":", "_"); // Would rather not use colons in indexes
+  return origin + delim + realm + delim + postFix;
+}
+
+// Computes key Index for volatile storage, the keys dict
+// Takes an origin and realm
+function vIdx(origin, realm=""){
+  var delim = "!"; // Our delimeter for volatile storage, it's not clear what the character space is for HTTP realms
   var origin = origin.replace(":", "_"); // Would rather not use colons in keys
-  if(isPub){
-    return origin + delim + realm + delim + "pub";
-  }else{
-    return origin + delim + realm + delim + "pri";
-  }
+  return origin + delim + realm;
 }
 
-// Deletes a key from storage
-function delKey(isPub, origin, realm=""){
-  ss.storage.keys[keyIdx(isPub, origin, realm)] = null;
+// Deletes a key from NV and V storage
+function delKey(postFix, origin, realm=""){
+  ss.storage.keys[nvIdx(postFix, origin, realm)] = null;
+  keys[vIdx(origin, realm)] = null;
 }
 
-// Takes a string to 
-// Adds a string key to local non-volatile storage
-function addKey(str, isPub, origin, realm=""){
-  ss.storage.keys[keyIdx(isPub, origin, realm)] = str;
+// Adds a string key to NV storage
+function addKey(str, postFix, origin, realm=""){
+  ss.storage.keys[nvIdx(postFix, origin, realm)] = str;
 }
 
 // Returns Promise to return a key associated with origin 
-// from non-volatile storage
 // If no key stored returns a Promise that resolves to false
-function getKey(isPub, origin, realm=""){
-  dump("\nEntered getKey isPub:" + isPub + " origin:" + origin);
-  var idx = keyIdx(isPub, origin, realm);
+function getKey(postFix, origin, realm=""){
+  dump("\nEntered getKey postFix:" + postFix + " origin:" + origin + " realm:" + realm);
+  var idx = nvIdx(postFix, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     return Promise.resolve(false);
   }
 
-  if(isPub){
+  // Check volatile storage before hitting non-volatile
+  var vidx = vIdx(origin, realm);
+  if(keys[vidx] != undefined && keys[vidx] != null){
+    if(keys[vidx][postFix] != undefined && keys[vidx][postFix] != null){
+      if(keys[vidx][postFix] instanceof crypto.CryptoKey){
+	return Promise.resolve(keys[vidx][postFix]);
+      }
+    }
+  }
+  
+  if(postFix == "pub"){
     usage = "verify";
   }else{
     usage = "sign";
@@ -312,8 +390,8 @@ function getKey(isPub, origin, realm=""){
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){
   dump("\nEntered genNextkey");
-  delKey(true, "next");
-  delKey(false, "next");
+  delKey("pub", "next");
+  delKey("pri", "next");
 
   return crypto.subtle.generateKey( // See RFC 7486 section 7 for details
   {
@@ -344,15 +422,14 @@ if(! initKeyStorage()){ // Initialize our keys and storage
       Promise.all([ // Export pub and pri to non-volatile local storage
 	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(str){
-	    addKey(str, true, "next");
-	    ss.storage.keys[keyIdx(true, "next")] = str;
+	    addKey(str, "pub", "next");
 	  })
 	  .catch(function(err){
 	    dump("\nError storing next public key")
 	  }),
 	crypto.subtle.exportKey("jwk", keys['next']['pri'])
 	  .then(function(str){
-	    addKey(str, false, "next");
+	    addKey(str, "pri", "next");
 	  })
 	  .catch(function(err){
 	    dump("\nError storing next private key")
@@ -371,14 +448,14 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 }else{ // NV key storage exists, read next-key from NV to V storage
   keys['next'] = {};
   Promise.all([
-    getKey(true, "next")
+    getKey("pub", "next")
       .then(function(key){ 
 	keys['next']['pub'] = key;
       })
       .catch(function(err){
 	dump("\nError importing next public key")
       }),
-    getKey(false, "next")
+    getKey("pri", "next")
       .then(function(key){
 	keys['next']['pri'] = key;
       })
@@ -392,4 +469,3 @@ if(! initKeyStorage()){ // Initialize our keys and storage
       dump("\nError importing keys:" + err);
     });
 }
-
