@@ -1,3 +1,8 @@
+// Some discussion and bitching by me, also some really helpful links from people
+// https://discourse.mozilla-community.org/t/how-do-i-know-if-a-node-js-library-will-work-in-my-add-on/6845/8
+
+// Info on SPKI to PEM conversion
+// http://blog.engelke.com/2015/03/03/creating-x-509-certificates-with-web-crypto-and-pkijs/
 var self = require("sdk/self");
 var data = require("sdk/self").data;
 var ss = require("sdk/simple-storage");
@@ -51,8 +56,7 @@ function handleHttpReq(aSubject, aTopic, aData){
     if(hobaReg == "regok" && regInWork === true){
       dump("\nHobareg:" + hobaReg);
       regInWork = false;
-      addKey(keys['reginwork']['pub'], "pub", keys['reginwork']['origin'], keys['reginwork']['realm']);
-      addKey(keys['reginwork']['pri'], "pri", keys['reginwork']['origin'], keys['reginwork']['realm']);
+      rotatenextKey(keys['reginwork']['origin'], keys['reginwork']['realm']);
       keys['reginwork'] = {};
     }
   }
@@ -88,51 +92,16 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
 	      if(req.readyState !== XMLHttpRequest.DONE){ return; }
 	      var hobaReg = aSubject.getResponseHeader("Hobareg");
-	      if(hobaReg == "regok"){
+	      if(hobaReg == "regok"){ // Registration succeeded
 		regInWork = false;
-
-		Promise.all([ // Export pub and pri to non-volatile local storage
-		  crypto.subtle.exportKey("jwk", keys['next']['pub'])
-		    .then(function(str){
-		      addKey(str, "pub", "next");
-		    })
-		    .catch(function(err){
-		      dump("\nError storing next public key")
-		    }),
-		  crypto.subtle.exportKey("jwk", keys['next']['pri'])
-		    .then(function(str){
-		      addKey(str, "pri", "next");
-		    })
-		    .catch(function(err){
-		      dump("\nError storing next private key")
-		    })])
-		  .then(function(){
-		    registerHttp(); // register http request listener
-		  })
-		  .catch(function(err){
-		    dump("\nError storing next keypair:" + err);
-		  });
-
-
-
-		addKey(keys['next']['pub'], true, origin, realm);
-		addKey(keys['next']['pri'], false, origin, realm);
+		rotateNextKey(origin, realm);
 	      }else{ // HTTP POST returned but registration not done yet
-		keys['reginwork'] = {};
+		keys['reginwork'] = {}; // If there was a previous registration that never finished, clobber it
 		keys['reginwork']['pub'] = keys['next']['pub'];
 		keys['reginwork']['pri'] = keys['next']['pri'];
 		keys['reginwork']['origin'] = origin;
 		keys['reginwork']['realm'] = realm;
 	      }
-	      
-	      unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
-	      genNextKey()
-		.then(function(){
-		  registerHttp();
-		})
-		.catch(function(err){
-		  dump("\nError generating next key after reg" + err);
-		});
 	    };
 	    
 	    genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
@@ -178,7 +147,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 		    return;
 		  }
 		}
-		  
+
 		genSignedTbsBlob(privateKey, chal, kid, alg, tbsOrigin, realm)
 		  .then(function(tbsSig){
 		    dump("\ntbsOut:" + tbsSig[0]);
@@ -191,10 +160,12 @@ function handleHttpReq(aSubject, aTopic, aData){
 		  })
 		  .catch(function(err){
 		    dump("\nError generating TBS signature for " + origin);
-		  })});
+		  });
+	      })
 	      .catch(function(err){
 		dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
-	      })});
+	      });
+	  })
 	  .catch(function(err){
 	    dump("\nError getting publicKey for " + origin);
 	  });
@@ -385,7 +356,42 @@ function getKey(postFix, origin, realm=""){
 				 [usage]
 				);
 }
-  
+
+// Rotates next-key to an origin and realm, then regens next-key
+// Takes an origin and realm, returns nothing
+// Pauses https listening until next-key is refreshed
+// Returns prior to execution finishing
+function rotateNextKey(origin, realm){
+  Promise.all([ // Export pub and pri to non-volatile local storage
+    crypto.subtle.exportKey("jwk", keys['next']['pub'])
+      .then(function(str){
+	addKey(str, "pub", origin, realm);
+      })
+      .catch(function(err){
+	dump("\nError storing public key for " + origin + " " + realm)
+      }),
+    crypto.subtle.exportKey("jwk", keys['next']['pri'])
+      .then(function(str){
+	addKey(str, "pri", origin, realm);
+      })
+      .catch(function(err){
+	dump("\nError storing private key " + origin + " " + realm)
+      })])
+    .then(function(){
+      unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
+      genNextKey()
+	.then(function(){
+	  registerHttp();
+	})
+	.catch(function(err){
+	  dump("\nError generating next key after reg" + err);
+	});
+    })
+    .catch(function(err){
+      dump("\nError storing keypair for" + origin + " " + err);
+    });
+}
+
 // Returns Promise to generate a key
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){

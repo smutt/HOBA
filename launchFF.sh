@@ -1,6 +1,5 @@
 #!/bin/ksh
 export SSLKEYLOGFILE=./sslkey.log
-#/usr/local/bin/jpm run -p bob
+touch $SSLKEYLOGFILE
+chmod 644 $SSLKEYLOGFILE
 /usr/local/bin/jpm run --no-copy --profile /Users/andrew.mcconachie/Library/Application\ Support/Firefox/Profiles/1ih26998.bob
-#/usr/local/bin/jpm run -p derp
-# /usr/local/bin/jpm run -p ./ff-profile
