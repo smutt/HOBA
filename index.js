@@ -13,7 +13,8 @@ var menuItem = require("menuitem");
 var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 Cu.importGlobalProperties(["atob", "btoa"]); // Bring in our base64 conversion functions
-Cu.importGlobalProperties(["XMLHttpRequest"]);
+Cu.importGlobalProperties(["XMLHttpRequest"]); // For HTTP POST/GET
+Cu.importGlobalProperties(["TextDecoder"]); // For ArrayBuffer --> utf-8 decoding
 
 // Some global variables
 var keys = {}; // Our dict of keys read into memory
@@ -106,16 +107,23 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    
 	    genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
 	      .then(function(tbsSig){
-		dump("\ntbsOut:" + tbsSig[0]);
-		var kid = b64ToUrlb64(btoa(kid));
+		dump("\ntbsSig.length:" + tbsSig.byteLength);
+		var tbsSigView = new Uint8Array(tbsSig);
+		dump("\ntbsSigView.length:" + tbsSig.length);
+		var decoder = new TextDecoder('utf-8');
+		var sigUtf8 = decoder.decode(tbsSigView);
+		dump("\nsigUtf8" + sigUtf8);
+		
+		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonce = b64ToUrlb64(btoa(nonce));
 		var sig = b64ToUrlb64(btoa(tbsSig));
-		var authHeader = kid + "." + chal + "." + nonce + "." + sig;
+		var authHeader = kidB64 + "." + chal + "." + nonce + "." + sig;
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
-		postData += "&kidtype=2&kid=" + kid; // We always use kidtype==2
+		postData += "&kidtype=2&kid=" + kidB64; // We always use kidtype==2
 		postData += "&didtype=0&did=" + did;
+		dump("\nsig:" + sig);
 		dump("\npostData:" + postData);
 		req.send(postData);
 	      })
@@ -150,7 +158,6 @@ function handleHttpReq(aSubject, aTopic, aData){
 
 		genSignedTbsBlob(privateKey, chal, kid, alg, tbsOrigin, realm)
 		  .then(function(tbsSig){
-		    dump("\ntbsOut:" + tbsSig[0]);
 		    var kid = b64ToUrlb64(btoa(kid));
 		    var nonce = b64ToUrlb64(btoa(nonce));
 		    var sig = b64ToUrlb64(btoa(tbsSig));
@@ -194,9 +201,10 @@ function genSignedTbsBlob(privKey, chal, kid, alg, origin, realm){
   tbsStr += chal.length.toString() + ":" + chal;
   dump("\ntbsStr == " + tbsStr);
 
-  var tbsBlob = new ArrayBuffer(1);
-  //  tbsBlob[0] = btoa(tbsStr);
-  tbsBlob[0] = tbsStr;
+  var tbsBlob = new ArrayBuffer(tbsStr.length * 2);
+  for(var ii=0; ii < tbsStr.length; ii++){
+    tbsBlob[ii] = tbsStr[ii];
+  }
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, tbsBlob);
 }
 
