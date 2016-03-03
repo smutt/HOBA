@@ -14,7 +14,7 @@ var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
 Cu.importGlobalProperties(["atob", "btoa"]); // Bring in our base64 conversion functions
 Cu.importGlobalProperties(["XMLHttpRequest"]); // For HTTP POST/GET
-Cu.importGlobalProperties(["TextDecoder"]); // For ArrayBuffer --> utf-8 decoding
+Cu.importGlobalProperties(["TextDecoder", "TextEncoder"]); // For string <--> ArrayBuffer conversion
 
 // Some global variables
 var keys = {}; // Our dict of keys read into memory
@@ -109,10 +109,9 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      .then(function(tbsSig){
 		dump("\ntbsSig.length:" + tbsSig.byteLength);
 		var tbsSigView = new Uint8Array(tbsSig);
-		dump("\ntbsSigView.length:" + tbsSig.length);
 		var decoder = new TextDecoder('utf-8');
 		var sigUtf8 = decoder.decode(tbsSigView);
-		dump("\nsigUtf8" + sigUtf8);
+		//dump("\nsigUtf8" + sigUtf8);
 		
 		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonce = b64ToUrlb64(btoa(nonce));
@@ -200,11 +199,9 @@ function genSignedTbsBlob(privKey, chal, kid, alg, origin, realm){
   tbsStr += kid.length.toString() + ":" + kid;
   tbsStr += chal.length.toString() + ":" + chal;
   dump("\ntbsStr == " + tbsStr);
-
-  var tbsBlob = new ArrayBuffer(tbsStr.length * 2);
-  for(var ii=0; ii < tbsStr.length; ii++){
-    tbsBlob[ii] = tbsStr[ii];
-  }
+  
+  var encoder = new TextEncoder('utf-8');
+  var tbsBlob = encoder.encode(tbsStr);
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, tbsBlob);
 }
 
