@@ -11,10 +11,7 @@ var menuItem = require("menuitem");
 //var hoba = require("./lib/hoba.js"); // HOBA specific functions
 //var jwkToPem = require("jwk-to-pem");
 var sha256 = require("lib/sha256.js");
-Cu.importGlobalProperties(["crypto"]); // Bring in our crypto libraries
-Cu.importGlobalProperties(["atob", "btoa"]); // Bring in our base64 conversion functions
-Cu.importGlobalProperties(["XMLHttpRequest"]); // For HTTP POST/GET
-Cu.importGlobalProperties(["TextDecoder", "TextEncoder"]); // For string <--> ArrayBuffer conversion
+Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDecoder", "TextEncoder"]);
 
 // Some global variables
 var keys = {}; // Our dict of keys read into memory
@@ -41,7 +38,11 @@ function handleHttpReq(aSubject, aTopic, aData){
   // Mozilla says this is best practice
   if(aTopic != "http-on-examine-response") { return; }
 
-  aSubject.QueryInterface(Ci.nsIHttpChannel);  
+  aSubject.QueryInterface(Ci.nsIHttpChannel);
+
+  // Is the connection using TLS?
+  if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
+  //dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
   // Is there auth, and is it HOBA?
   // For now we don't worry about challenge timeout
@@ -77,10 +78,6 @@ function handleHttpReq(aSubject, aTopic, aData){
   }
   dump("\nrealm:" + realm);
   
-  // Is the connection using TLS?
-  if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
-  dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
-
   var origin = getOrigin(aSubject.URI.spec); // Consider using aSubject.origin
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
   getKey(false, origin, realm)
