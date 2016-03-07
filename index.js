@@ -41,18 +41,26 @@ function handleHttpReq(aSubject, aTopic, aData){
   // Mozilla says this is best practice
   if(aTopic != "http-on-examine-response") { return; }
 
-  aSubject.QueryInterface(Ci.nsIHttpChannel);
+  aSubject.QueryInterface(Ci.nsIHttpChannel);  
 
   // Is there auth, and is it HOBA?
   // For now we don't worry about challenge timeout
-  var authChallenge = aSubject.getResponseHeader("WWW-Authenticate");
+  // getResponseHeader() will bork if requesting non-present header
+  try{
+    var authChallenge = aSubject.getResponseHeader("WWW-Authenticate");
+  }catch(err){
+    return;
+  }
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
   var chal = authChallenge.match(/challenge=(.*?),/)[1];
   dump("\nchal:" + chal);
 
   // Are we finishing up an earlier registration?
-  var hobaReg = null;
-//  var hobaReg = aSubject.getResponseHeader("Hobareg"); // This just does not work for some reason
+  try{
+    var hobaReg = aSubject.getResponseHeader("Hobareg");
+  }catch(err){
+    var hobaReg = null;
+  }
   if(hobaReg !== null){
     if(hobaReg == "regok" && regInWork === true){
       dump("\nHobareg:" + hobaReg);
@@ -73,7 +81,7 @@ function handleHttpReq(aSubject, aTopic, aData){
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
   dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
-  var origin = getOrigin(aSubject.URI.spec);
+  var origin = getOrigin(aSubject.URI.spec); // Consider using aSubject.origin
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
   getKey(false, origin, realm)
     .then(function(privateKey){
