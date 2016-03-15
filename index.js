@@ -53,8 +53,7 @@ function handleHttpReq(aSubject, aTopic, aData){
     return;
   }
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
-  var chal = atob(authChallenge.match(/challenge=(.*?),/)[1]);
-  dump("\nchal.length:" + chal.length);
+  var chalB64 = authChallenge.match(/challenge=(.*?),/)[1];
 
   // Are we finishing up an earlier registration?
   try{
@@ -95,7 +94,6 @@ function handleHttpReq(aSubject, aTopic, aData){
 	  .then(function(jwkObj){
 	    jwk = JSON.stringify(jwkObj);
 	    var kid = sha256.hash(jwk);
-	    dump("\nkid:" + kid);
 	    
 	    var req = new XMLHttpRequest();
 	    dump("\nRegister-URI:" + tbsOrigin + "/.well-known/hoba/register");
@@ -118,7 +116,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      }
 	    };
 
-	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, origin, realm, kid, chal)
+	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, origin, realm, kid, chalB64)
 	      .then(function(tbsSig){
 		var tbsSigView = new Uint8Array(tbsSig);
 		var sigAsc = new TextDecoder("windows-1252").decode(tbsSigView);
@@ -127,9 +125,11 @@ function handleHttpReq(aSubject, aTopic, aData){
 
 		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonceB64 = b64ToUrlb64(btoa(nonce));
-		var chalB64 = b64ToUrlb64(btoa(chal));
-		
 		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + sigB64;
+
+		dump("\nkid:" + kid);
+		dump("\nchalB64:" + chalB64);
+		dump("\nnonce:" + nonce);
 		dump("\nauthHeader:" + authHeader);
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		
@@ -168,12 +168,12 @@ function handleHttpReq(aSubject, aTopic, aData){
 		  }
 		}
 
-		genSignedTbsBlob(privateKey, nonce, alg, origin, realm, kid, chal)
+		genSignedTbsBlob(privateKey, nonce, alg, origin, realm, kid, chalB64)
 		  .then(function(tbsSig){
 		    var kid = b64ToUrlb64(btoa(kid));
 		    var nonce = b64ToUrlb64(btoa(nonce));
 		    var sig = b64ToUrlb64(btoa(tbsSig));
-		    var authHeader = kid + "." + chal + "." + nonce + "." + sig;
+		    var authHeader = kid + "." + chalB64 + "." + nonce + "." + sig;
 		    req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		    req.send();
 		  })
@@ -197,13 +197,13 @@ function handleHttpReq(aSubject, aTopic, aData){
 
 // Takes a privateKey obj, nonce, an HTTP Auth challenge, key-id, algorithm-id, http-origin and realm
 // Returns Promise that returns signature of HOBA TBS-blob
-function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chal){
+function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chalB64){
   var tbsStr = genBlobField(b64ToUrlb64(btoa(nonce)));
   tbsStr += genBlobField(alg);
   tbsStr += genBlobField(origin);
   tbsStr += genBlobField(realm);
   tbsStr += genBlobField(b64ToUrlb64(btoa(kid)));
-  tbsStr += genBlobField(b64ToUrlb64(btoa(chal)));
+  tbsStr += chalB64;
   //dump("\ntbsStr:" + tbsStr);
   
   var encoder = new TextEncoder("unicode-1-1-utf-8");
