@@ -53,8 +53,8 @@ function handleHttpReq(aSubject, aTopic, aData){
     return;
   }
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
-  var chal = authChallenge.match(/challenge=(.*?),/)[1];
-  dump("\nchal:" + chal);
+  var chal = atob(authChallenge.match(/challenge=(.*?),/)[1]);
+  dump("\nchal.length:" + chal.length);
 
   // Are we finishing up an earlier registration?
   try{
@@ -82,6 +82,12 @@ function handleHttpReq(aSubject, aTopic, aData){
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
   getKey(false, origin, realm)
     .then(function(privateKey){
+
+      // Generate our 32-bit nonce
+      var rands = new Uint32Array(1);
+      crypto.getRandomValues(rands);
+      var nonce = rands[0].toString(10);
+
       if(privateKey === false){ // We have no key for this origin/realm, begin registration
 	dump("\nInitiating new registration for origin:" + origin + " realm:");
 	regInWork = true;    
@@ -92,13 +98,15 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    dump("\nkid:" + kid);
 	    
 	    var req = new XMLHttpRequest();
-	    dump("\nRegister URI:" + tbsOrigin + "/.well-known/hoba/register");
+	    dump("\nRegister-URI:" + tbsOrigin + "/.well-known/hoba/register");
 	    req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
 	    req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
+	      dump("\nEntered onreadystatechange Callback");
 	      if(req.readyState !== XMLHttpRequest.DONE){ return; }
 	      var hobaReg = aSubject.getResponseHeader("Hobareg");
 	      if(hobaReg == "regok"){ // Registration succeeded
+		dump("\nregok");
 		regInWork = false;
 		rotateNextKey(origin, realm);
 	      }else{ // HTTP POST returned but registration not done yet
@@ -109,30 +117,30 @@ function handleHttpReq(aSubject, aTopic, aData){
 		keys['reginwork']['realm'] = realm;
 	      }
 	    };
-	    
-	    genSignedTbsBlob(keys['next']['pri'], chal, kid, alg, tbsOrigin, realm)
+
+	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, origin, realm, kid, chal)
 	      .then(function(tbsSig){
-		dump("\ntbsSig.length:" + tbsSig.byteLength);
 		var tbsSigView = new Uint8Array(tbsSig);
-		var decoder = new TextDecoder('utf-8');
-		var sigUtf8 = decoder.decode(tbsSigView);
-		//dump("\nsigUtf8" + sigUtf8);
-		
+		var sigAsc = new TextDecoder("windows-1252").decode(tbsSigView);
+		var sigB64 = b64ToUrlb64(btoa(encodeURIComponent(sigAsc)));
+		//dump("\nsig:" + sigB64);
+
 		var kidB64 = b64ToUrlb64(btoa(kid));
-		var nonce = b64ToUrlb64(btoa(nonce));
-		var sig = b64ToUrlb64(btoa(tbsSig));
-		var authHeader = kidB64 + "." + chal + "." + nonce + "." + sig;
+		var nonceB64 = b64ToUrlb64(btoa(nonce));
+		var chalB64 = b64ToUrlb64(btoa(chal));
+		
+		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + sigB64;
+		dump("\nauthHeader:" + authHeader);
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
 		postData += "&kidtype=2&kid=" + kidB64; // We always use kidtype==2
 		postData += "&didtype=0&did=" + did;
-		dump("\nsig:" + sig);
 		dump("\npostData:" + postData);
 		req.send(postData);
 	      })
 	      .catch(function(err){
-		dump("\nError generating TBS signature for " + origin);
+		dump("\nError generating TBS signature for " + origin + " " + err);
 	      });
 	  })
 	  .catch(function(err){
@@ -160,7 +168,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 		  }
 		}
 
-		genSignedTbsBlob(privateKey, chal, kid, alg, tbsOrigin, realm)
+		genSignedTbsBlob(privateKey, nonce, alg, origin, realm, kid, chal)
 		  .then(function(tbsSig){
 		    var kid = b64ToUrlb64(btoa(kid));
 		    var nonce = b64ToUrlb64(btoa(nonce));
@@ -170,7 +178,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 		    req.send();
 		  })
 		  .catch(function(err){
-		    dump("\nError generating TBS signature for " + origin);
+		    dump("\nError generating TBS signature for " + origin + " " + err);
 		  });
 	      })
 	      .catch(function(err){
@@ -178,36 +186,49 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      });
 	  })
 	  .catch(function(err){
-	    dump("\nError getting publicKey for " + origin);
+	    dump("\nError getting publicKey for " + origin + " " + err);
 	  });
       }
     })
     .catch(function(err){
-      dump("\nError getting privateKey for " + origin);
+      dump("\nError getting privateKey for " + origin + " " + err);
     });
-  dump("\nEnd of handleHttpReq()");
 }
 
-// Takes a key obj, an HTTP Auth challenge, key-id, algorithm-id, http-origin and realm
+// Takes a privateKey obj, nonce, an HTTP Auth challenge, key-id, algorithm-id, http-origin and realm
 // Returns Promise that returns signature of HOBA TBS-blob
-function genSignedTbsBlob(privKey, chal, kid, alg, origin, realm){
-  var rands = new Uint32Array(1);
-  crypto.getRandomValues(rands);
-  var nonce = rands[0].toString();
-  if(nonce.charAt(nonce.length - 1) == "="){
-    nonce = nonce.substring(0, nonce.length-1);
-  }
-  var tbsStr = nonce.length.toString() + ":" + nonce;
-  tbsStr += alg.length.toString() + ":" + alg;
-  tbsStr += origin.length.toString() + ":" + origin;
-  tbsStr += realm.length.toString() + ":" + realm;
-  tbsStr += kid.length.toString() + ":" + kid;
-  tbsStr += chal.length.toString() + ":" + chal;
-  dump("\ntbsStr == " + tbsStr);
+function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chal){
+  var tbsStr = genBlobField(b64ToUrlb64(btoa(nonce)));
+  tbsStr += genBlobField(alg);
+  tbsStr += genBlobField(origin);
+  tbsStr += genBlobField(realm);
+  tbsStr += genBlobField(b64ToUrlb64(btoa(kid)));
+  tbsStr += genBlobField(b64ToUrlb64(btoa(chal)));
+  //dump("\ntbsStr:" + tbsStr);
   
-  var encoder = new TextEncoder('utf-8');
-  var tbsBlob = encoder.encode(tbsStr);
-  return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, tbsBlob);
+  var encoder = new TextEncoder("unicode-1-1-utf-8");
+  return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, encoder.encode(tbsStr));
+}
+
+function genBlobField(str){
+  return str.length + ":" + str;
+}
+
+
+// Takes a base64 encoded string
+// Returns a base64url encoded string
+function b64ToUrlb64(str){
+  var rv = "";
+  for(ii = 0; ii < str.length; ++ii){
+    if (str[ii] == '+'){
+	rv += '-';
+    }else if(str[ii] == '/'){
+      rv += '_';
+    } else {
+      rv += str[ii];
+    }
+  }
+  return rv;
 }
 
 // Takes a URL
@@ -236,22 +257,6 @@ function getTbsOrigin(uri){
     var port = ":" + right.split(":")[1].split("/")[0];
   }
   return proto + "://" + host + port;
-}
-
-// Takes a base64 encoded string
-// Returns a base64url encoded string
-function b64ToUrlb64(str){
-  var rv = "";
-  for(ii = 0; ii < str.length; ++ii){
-    if (str[ii] == '+'){
-	rv += '-';
-    }else if(str[ii] == '/'){
-      rv += '_';
-    } else {
-      rv += str[ii];
-    }
-  }
-  return rv;
 }
 
 var menuItem = menuItem.Menuitem({
@@ -378,14 +383,14 @@ function rotateNextKey(origin, realm){
 	addKey(str, "pub", origin, realm);
       })
       .catch(function(err){
-	dump("\nError storing public key for " + origin + " " + realm)
+	dump("\nError storing public key for " + origin + " " + realm + " " + err)
       }),
     crypto.subtle.exportKey("jwk", keys['next']['pri'])
       .then(function(str){
 	addKey(str, "pri", origin, realm);
       })
       .catch(function(err){
-	dump("\nError storing private key " + origin + " " + realm)
+	dump("\nError storing private key " + origin + " " + realm + " " + err)
       })])
     .then(function(){
       unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
@@ -441,14 +446,14 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	    addKey(str, "pub", "next");
 	  })
 	  .catch(function(err){
-	    dump("\nError storing next public key")
+	    dump("\nError storing next public key" + " " + err)
 	  }),
 	crypto.subtle.exportKey("jwk", keys['next']['pri'])
 	  .then(function(str){
 	    addKey(str, "pri", "next");
 	  })
 	  .catch(function(err){
-	    dump("\nError storing next private key")
+	    dump("\nError storing next private key" + " " + err)
 	  })])
 	.then(function(){
 	  registerHttp(); // register http request listener
@@ -458,7 +463,7 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	});
     })
     .catch(function(err){
-      dump("\nError running genKey")
+      dump("\nError running genKey" + " " + err)
     });
 
 }else{ // NV key storage exists, read next-key from NV to V storage
@@ -469,14 +474,14 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	keys['next']['pub'] = key;
       })
       .catch(function(err){
-	dump("\nError importing next public key")
+	dump("\nError importing next public key" + " " + err)
       }),
     getKey("pri", "next")
       .then(function(key){
 	keys['next']['pri'] = key;
       })
       .catch(function(err){
-	dump("\nError importing next private key")
+	dump("\nError importing next private key" + " " + err)
       })])
     .then(function(){
       registerHttp(); // register http request listener
