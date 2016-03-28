@@ -116,26 +116,25 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      }
 	    };
 
-	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, origin, realm, kid, chalB64)
+	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, tbsOrigin, realm, kid, chalB64)
 	      .then(function(tbsSig){
-		var tbsSigView = new Uint8Array(tbsSig);
-		var sigAsc = new TextDecoder("windows-1252").decode(tbsSigView);
-		var sigB64 = b64ToUrlb64(btoa(encodeURIComponent(sigAsc)));
-		//dump("\nsig:" + sigB64);
+		var tbsSigB64 = b64ToUrlb64(bufferToBase64(tbsSig));
+		dump("\ntbsSigB64:" + tbsSigB64);
 
 		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonceB64 = b64ToUrlb64(btoa(nonce));
-		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + sigB64;
+		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
 
-		dump("\nkid:" + kid);
-		dump("\nchalB64:" + chalB64);
-		dump("\nnonce:" + nonce);
+		dump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
 		dump("\nauthHeader:" + authHeader);
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
-		
+
+		// RFC 7486 lists kid as optional but it's really not
+		// It doesn't list alg but it's needed
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
 		postData += "&kidtype=2&kid=" + kidB64; // We always use kidtype==2
 		postData += "&didtype=0&did=" + did;
+		postData += "&alg=" + alg;
 		dump("\npostData:" + postData);
 		req.send(postData);
 	      })
@@ -199,21 +198,24 @@ function handleHttpReq(aSubject, aTopic, aData){
 // Returns Promise that returns signature of HOBA TBS-blob
 function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chalB64){
   var tbsStr = genBlobField(b64ToUrlb64(btoa(nonce)));
-  tbsStr += genBlobField(alg);
-  tbsStr += genBlobField(origin);
-  tbsStr += genBlobField(realm);
+  tbsStr += genBlobField(b64ToUrlb64(btoa(alg)));
+  tbsStr += genBlobField(b64ToUrlb64(btoa(origin)));
+  if(realm.length == 0){
+    tbsStr += genBlobField("");
+  }else{
+    tbsStr += genBlobField(b64ToUrlb64(btoa(realm)));
+  }
   tbsStr += genBlobField(b64ToUrlb64(btoa(kid)));
   tbsStr += chalB64;
   //dump("\ntbsStr:" + tbsStr);
-  
   var encoder = new TextEncoder("unicode-1-1-utf-8");
+
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, encoder.encode(tbsStr));
 }
 
 function genBlobField(str){
   return str.length + ":" + str;
 }
-
 
 // Takes a base64 encoded string
 // Returns a base64url encoded string
@@ -229,6 +231,17 @@ function b64ToUrlb64(str){
     }
   }
   return rv;
+}
+
+// From http://stackoverflow.com/questions/9267899/arraybuffer-to-base64-encoded-string
+function bufferToBase64(buffer){
+  var binary = '';
+  var bytes = new Uint8Array(buffer);
+  var len = bytes.byteLength;
+  for (var ii = 0; ii < len; ii++) {
+    binary += String.fromCharCode(bytes[ii]);
+  }
+  return btoa(binary);
 }
 
 // Takes a URL
