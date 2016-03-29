@@ -119,7 +119,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    genSignedTbsBlob(keys['next']['pri'], nonce, alg, tbsOrigin, realm, kid, chalB64)
 	      .then(function(tbsSig){
 		var tbsSigB64 = b64ToUrlb64(bufferToBase64(tbsSig));
-		dump("\ntbsSigB64:" + tbsSigB64);
+		//dump("\ntbsSigB64:" + tbsSigB64);
 
 		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonceB64 = b64ToUrlb64(btoa(nonce));
@@ -198,16 +198,16 @@ function handleHttpReq(aSubject, aTopic, aData){
 // Returns Promise that returns signature of HOBA TBS-blob
 function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chalB64){
   var tbsStr = genBlobField(b64ToUrlb64(btoa(nonce)));
-  tbsStr += genBlobField(b64ToUrlb64(btoa(alg)));
-  tbsStr += genBlobField(b64ToUrlb64(btoa(origin)));
+  tbsStr += genBlobField(alg);
+  tbsStr += genBlobField(origin);
   if(realm.length == 0){
     tbsStr += genBlobField("");
   }else{
-    tbsStr += genBlobField(b64ToUrlb64(btoa(realm)));
+    tbsStr += genBlobField(realm);
   }
   tbsStr += genBlobField(b64ToUrlb64(btoa(kid)));
-  tbsStr += chalB64;
-  //dump("\ntbsStr:" + tbsStr);
+  tbsStr += genBlobField(chalB64);
+  dump("\ntbsStr:" + tbsStr);
   var encoder = new TextEncoder("unicode-1-1-utf-8");
 
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, encoder.encode(tbsStr));
