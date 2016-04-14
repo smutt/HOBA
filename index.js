@@ -11,11 +11,13 @@ var menuItem = require("menuitem");
 var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDecoder", "TextEncoder"]);
 
-// Some global variables
+// Some global variables. see RFC 7486 for details
 var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
-var alg = "1"; // Not sure what should be here :(
-var did = "firefox_hoba"; // Our arbitrary device ID
+var alg = "0"; // We only support RSA-SHA256
+var kidType = "0"; // We only support hashed public keys for kid-type
+var did = "firefox_hoba"; // Our arbitrary device ID, TODO: Add random bits to end
+var didType = "0"; // This is the only entry in the IANA registry
 
 // Register observer service
 function registerHttp(){
@@ -74,7 +76,6 @@ function handleHttpReq(aSubject, aTopic, aData){
   }else{
     var realm = authChallenge.match(/realm=(.*?),/)[1];
   }
-  dump("\nrealm:" + realm);
   
   var origin = getOrigin(aSubject.URI.spec); // Consider using aSubject.origin
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
@@ -87,7 +88,7 @@ function handleHttpReq(aSubject, aTopic, aData){
       var nonce = rands[0].toString(10);
 
       if(privateKey === false){ // We have no key for this origin/realm, begin registration
-	dump("\nInitiating new registration for origin:" + origin + " realm:");
+	dump("\nInitiating new registration for origin!" + origin + " realm!");
 	regInWork = true;    
 	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(jwkObj){
@@ -95,7 +96,6 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    var kid = sha256.hash(jwk);
 	    
 	    var req = new XMLHttpRequest();
-	    dump("\nRegister-URI:" + tbsOrigin + "/.well-known/hoba/register");
 	    req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
 	    req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
@@ -130,8 +130,8 @@ function handleHttpReq(aSubject, aTopic, aData){
 		// RFC 7486 lists kid as optional but it's really not
 		// It doesn't list alg but it's needed
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
-		postData += "&kidtype=2&kid=" + kidB64; // We always use kidtype==2
-		postData += "&didtype=0&did=" + did;
+		postData += "&kidtype=" + kidType + "&kid=" + kidB64;
+		postData += "&didtype=" + didType + "&did=" + did;
 		postData += "&alg=" + alg;
 		//dump("\npostData:" + postData);
 		req.send(postData);
@@ -144,17 +144,15 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
 	  });
       }else{ // We have a key for this origin, begin login
-	dump("\nInitiating login for origin:" + origin + " realm:");
+	dump("\nInitiating login for origin!" + origin + " realm!");
 	getKey('pub', origin, realm)
 	  .then(function(publicKey){
 	    crypto.subtle.exportKey("jwk", publicKey)
 	      .then(function(jwkObj){
 		jwk = JSON.stringify(jwkObj);
 		var kid = sha256.hash(jwk);
-		dump("\nkid:" + kid);
 
 		var req = new XMLHttpRequest();
-		dump("\nLogin-URI:" + tbsOrigin + "/.well-known/hoba/login");
 		req.open("GET", tbsOrigin + "/.well-known/hoba/login", true);
 
 		genSignedTbsBlob(privateKey, nonce, alg, tbsOrigin, realm, kid, chalB64)
@@ -164,8 +162,8 @@ function handleHttpReq(aSubject, aTopic, aData){
                     var nonceB64 = b64ToUrlb64(btoa(nonce));
                     var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
 
-		    dump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
-                    dump("\nauthHeader:" + authHeader);
+		    //dump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
+                    //dump("\nauthHeader:" + authHeader);
 		    req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		    req.send();
 		  })
@@ -343,7 +341,7 @@ function addKey(str, postFix, origin, realm=""){
 // Returns Promise to return a key associated with origin 
 // If no key stored returns a Promise that resolves to false
 function getKey(postFix, origin, realm=""){
-  dump("\nEntered getKey postFix:" + postFix + " origin:" + origin + " realm:" + realm);
+  //dump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
   var idx = nvIdx(postFix, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     dump("\nDid NOT find key for:" + idx);
