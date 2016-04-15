@@ -6,24 +6,69 @@
 var self = require("sdk/self");
 var data = require("sdk/self").data;
 var ss = require("sdk/simple-storage");
-let { Cu, Cc, Ci } = require('chrome');
+let {Cu, Cc, Ci} = require('chrome');
 var menuItem = require("menuitem");
 var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDecoder", "TextEncoder"]);
 
 // Some global variables. see RFC 7486 for details
+var dbg = true; // Set to true to enable debugging to the console
 var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
 var alg = "0"; // We only support RSA-SHA256
 var kidType = "0"; // We only support hashed public keys for kid-type
 var didType = "0"; // This is the only entry in the IANA registry
-var dbg = true; // Set to true to enable debugging to the console
 
 // A simple wrapper for the dump() function
 function hump(str){
   if(dbg){
     dump(str);
   }
+}
+
+// Adds a clickable to the "Tools" dropdown
+var menuItem = menuItem.Menuitem({
+  id: "clickme",
+  menuid: "menu_ToolsPopup",
+  label: "HOBA",
+  onCommand: function(){
+    showCfgPanel()
+  },
+  insertbefore: "menu_pageInfo"
+});
+
+// Construct a panel, loading its content from the "cfgPanel.html"
+// file in the "data" directory, and loading the "get-text.js" script
+// into it.
+// https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
+var cfgPanel = require("sdk/panel").Panel({
+  contentURL: data.url("cfgPanel.html"),
+  contentScriptFile: data.url("cfgPanel.js"),
+});
+
+// When the panel is displayed it generated an event called
+// "show": we will listen for that event and when it happens,
+// send our own "show" event to the panel's script, so the
+// script can prepare the panel for display.
+cfgPanel.on("show", function() {
+  // Prepare data to be sent
+  var key1 = ["hash1", "site1"];
+  var key2 = ["hash2", "site2"];
+  var key3 = ["hash3", "site3"];
+  var data = [key1, key2, key3];
+
+  cfgPanel.port.emit("show", data);
+});
+
+// Listen for messages called "finished" coming from the content script.
+cfgPanel.port.on("finished", function(data){
+  // Do something here?
+  cfgPanel.hide();
+});
+
+// Show the panel when the user activates the menu item
+function showCfgPanel(state) {
+  cfgPanel.show();
 }
 
 // Register observer service
@@ -135,7 +180,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 
 		// RFC 7486 lists kid as optional but it's really not
-		// It doesn't list alg but it's needed
+		// It doesn't list alg but it's also needed IMO
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
 		postData += "&kidtype=" + kidType + "&kid=" + kidB64;
 		postData += "&didtype=" + didType + "&did=" + ss.storage.deviceID;
@@ -268,30 +313,6 @@ function getTbsOrigin(uri){
     var port = ":" + right.split(":")[1].split("/")[0];
   }
   return proto + "://" + host + port;
-}
-
-// Adds a clickable to the "Tools" dropdown
-var menuItem = menuItem.Menuitem({
-  id: "clickme",
-  menuid: "menu_ToolsPopup",
-  label: "HOBA",
-  onCommand: function(){
-    showCfgPanel()
-  },
-  insertbefore: "menu_pageInfo"
-});
-
-// Construct a panel, loading its content from the "cfgPanel.html"
-// file in the "data" directory, and loading the "get-text.js" script
-// into it.
-// https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
-var cfgPanel = require("sdk/panel").Panel({
-  contentURL: data.url("cfgPanel.html"),
-});
-
-// Show the panel when the user activates the menu item
-function showCfgPanel(state) {
-  cfgPanel.show();
 }
 
 // Check if simple storage is already init'd
