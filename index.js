@@ -16,7 +16,6 @@ var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
 var alg = "0"; // We only support RSA-SHA256
 var kidType = "0"; // We only support hashed public keys for kid-type
-var did = "firefox_hoba"; // Our arbitrary device ID, TODO: Add random bits to end
 var didType = "0"; // This is the only entry in the IANA registry
 
 // Register observer service
@@ -89,7 +88,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 
       if(privateKey === false){ // We have no key for this origin/realm, begin registration
 	dump("\nInitiating new registration for origin!" + origin + " realm!");
-	regInWork = true;    
+	regInWork = true;
 	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(jwkObj){
 	    jwk = JSON.stringify(jwkObj);
@@ -131,7 +130,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 		// It doesn't list alg but it's needed
 		var postData = "pub=" + b64ToUrlb64(btoa(jwk));
 		postData += "&kidtype=" + kidType + "&kid=" + kidB64;
-		postData += "&didtype=" + didType + "&did=" + did;
+		postData += "&didtype=" + didType + "&did=" + ss.storage.deviceID;
 		postData += "&alg=" + alg;
 		//dump("\npostData:" + postData);
 		req.send(postData);
@@ -297,6 +296,11 @@ function initKeyStorage(){
     resetKeyStorage();
     ss.storage.keys_exists = true;
     ss.storage.keys = {};
+    
+    var rands = new Uint16Array(1);
+    crypto.getRandomValues(rands);
+    ss.storage.deviceID = "firefox_" + rands[0].toString(10);
+
     return false;
   }else{
     return true;
@@ -307,7 +311,9 @@ function initKeyStorage(){
 function resetKeyStorage(){
   keys = {}
   ss.storage.keys = null
+  ss.storage.deviceID = null;
   ss.storage.keys_exists = false;
+
 }
   
 // Computes key Index for local non-volatile(NV) storage, simple-storage
