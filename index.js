@@ -17,6 +17,14 @@ var regInWork = false; // Are we in the process of registering?
 var alg = "0"; // We only support RSA-SHA256
 var kidType = "0"; // We only support hashed public keys for kid-type
 var didType = "0"; // This is the only entry in the IANA registry
+var dbg = true; // Set to true to enable debugging to the console
+
+// A simple wrapper for the dump() function
+function hump(str){
+  if(dbg){
+    dump(str);
+  }
+}
 
 // Register observer service
 function registerHttp(){
@@ -41,7 +49,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 
   // Is the connection using TLS?
   if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
-  //dump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
+  //hump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
   // Is there auth, and is it HOBA?
   // For now we don't worry about challenge timeout
@@ -62,8 +70,8 @@ function handleHttpReq(aSubject, aTopic, aData){
   }
   if(hobaReg !== null){
     if(hobaReg == "regok" && regInWork === true){
-      dump("\nCompleting earlier registration");
-      dump("\nHobareg:" + hobaReg);
+      hump("\nCompleting earlier registration");
+      hump("\nHobareg:" + hobaReg);
       regInWork = false;
       rotatenextKey(keys['reginwork']['origin'], keys['reginwork']['realm']);
       keys['reginwork'] = {};
@@ -87,7 +95,7 @@ function handleHttpReq(aSubject, aTopic, aData){
       var nonce = rands[0].toString(10);
 
       if(privateKey === false){ // We have no key for this origin/realm, begin registration
-	dump("\nInitiating new registration for origin!" + origin + " realm!");
+	hump("\nInitiating new registration for origin!" + origin + " realm!");
 	regInWork = true;
 	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(jwkObj){
@@ -99,11 +107,11 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
 	      if(req.readyState !== XMLHttpRequest.DONE){ return; }
-	      dump("\nRegistration finished");
+	      hump("\nRegistration finished");
 
 	      var hobaReg = req.getAllResponseHeaders().match(/hobareg:(.*)/i)[1].trim();
 	      if(hobaReg == 'regok'){ // Registration succeeded
-		dump("\nregok");
+		hump("\nregok");
 		regInWork = false;
 		rotateNextKey(origin, realm);
 	      }else if(hobaReg == 'reginwork'){ // HTTP POST returned but registration not done yet
@@ -122,8 +130,8 @@ function handleHttpReq(aSubject, aTopic, aData){
 		var nonceB64 = b64ToUrlb64(btoa(nonce));
 		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
 
-		//dump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
-		//dump("\nauthHeader:" + authHeader);
+		//hump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
+		//hump("\nauthHeader:" + authHeader);
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 
 		// RFC 7486 lists kid as optional but it's really not
@@ -132,18 +140,18 @@ function handleHttpReq(aSubject, aTopic, aData){
 		postData += "&kidtype=" + kidType + "&kid=" + kidB64;
 		postData += "&didtype=" + didType + "&did=" + ss.storage.deviceID;
 		postData += "&alg=" + alg;
-		//dump("\npostData:" + postData);
+		//hump("\npostData:" + postData);
 		req.send(postData);
 	      })
 	      .catch(function(err){
-		dump("\nError generating TBS signature for " + origin + " " + err);
+		hump("\nError generating TBS signature for " + origin + " " + err);
 	      });
 	  })
 	  .catch(function(err){
-	    dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
+	    hump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
 	  });
       }else{ // We have a key for this origin, begin login
-	dump("\nInitiating login for origin!" + origin + " realm!");
+	hump("\nInitiating login for origin!" + origin + " realm!");
 	getKey('pub', origin, realm)
 	  .then(function(publicKey){
 	    crypto.subtle.exportKey("jwk", publicKey)
@@ -161,26 +169,26 @@ function handleHttpReq(aSubject, aTopic, aData){
                     var nonceB64 = b64ToUrlb64(btoa(nonce));
                     var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
 
-		    //dump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
-                    //dump("\nauthHeader:" + authHeader);
+		    //hump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
+                    //hump("\nauthHeader:" + authHeader);
 		    req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		    req.send();
 		  })
 		  .catch(function(err){
-		    dump("\nError generating TBS signature for " + origin + " " + err);
+		    hump("\nError generating TBS signature for " + origin + " " + err);
 		  });
 	      })
 	      .catch(function(err){
-		dump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
+		hump("\nError generating registration JWK for " + origin + " " + realm + " " + err);
 	      });
 	  })
 	  .catch(function(err){
-	    dump("\nError getting publicKey for " + origin + " " + err);
+	    hump("\nError getting publicKey for " + origin + " " + err);
 	  });
       }
     })
     .catch(function(err){
-      dump("\nError getting privateKey for " + origin + " " + err);
+      hump("\nError getting privateKey for " + origin + " " + err);
     });
 }
 
@@ -197,7 +205,7 @@ function genSignedTbsBlob(privKey, nonce, alg, origin, realm, kid, chalB64){
   }
   tbsStr += genBlobField(b64ToUrlb64(btoa(kid)));
   tbsStr += genBlobField(chalB64);
-  //dump("\ntbsStr:" + tbsStr);
+  //hump("\ntbsStr:" + tbsStr);
 
   var encoder = new TextEncoder("unicode-1-1-utf-8");
   return crypto.subtle.sign({name:'RSASSA-PKCS1-v1_5'}, privKey, encoder.encode(tbsStr));
@@ -262,12 +270,12 @@ function getTbsOrigin(uri){
   return proto + "://" + host + port;
 }
 
+// Adds a clickable to the "Tools" dropdown
 var menuItem = menuItem.Menuitem({
   id: "clickme",
   menuid: "menu_ToolsPopup",
   label: "HOBA",
-  onCommand: function() {
-    //    console.log("clicked");
+  onCommand: function(){
     showCfgPanel()
   },
   insertbefore: "menu_pageInfo"
@@ -347,10 +355,10 @@ function addKey(str, postFix, origin, realm=""){
 // Returns Promise to return a key associated with origin 
 // If no key stored returns a Promise that resolves to false
 function getKey(postFix, origin, realm=""){
-  //dump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
+  //hump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
   var idx = nvIdx(postFix, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
-    dump("\nDid NOT find key for:" + idx);
+    hump("\nDid NOT find key for:" + idx);
     return Promise.resolve(false);
   }
 
@@ -390,20 +398,20 @@ function rotateNextKey(origin, realm){
 	addKey(str, "pub", origin, realm);
       })
       .catch(function(err){
-	dump("\nError storing public key for " + origin + " " + realm + " " + err)
+	hump("\nError storing public key for " + origin + " " + realm + " " + err)
       }),
     crypto.subtle.exportKey("jwk", keys['next']['pri'])
       .then(function(str){
 	addKey(str, "pri", origin, realm);
       })
       .catch(function(err){
-	dump("\nError storing private key " + origin + " " + realm + " " + err)
+	hump("\nError storing private key " + origin + " " + realm + " " + err)
       })])
     .then(function(){
       unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
       genNextKey()
 	.then(function(keyPair){
-	  dump("\nFinished generating new key-pair");
+	  hump("\nFinished generating new key-pair");
 	  keys['next'] = {}; // Set our volatile copy of next-key
 	  keys['next']['pub'] = keyPair.publicKey;
 	  keys['next']['pri'] = keyPair.privateKey;
@@ -413,36 +421,36 @@ function rotateNextKey(origin, realm){
 		addKey(str, "pub", "next");
 	      })
 	      .catch(function(err){
-		dump("\nError storing next public key" + " " + err)
+		hump("\nError storing next public key" + " " + err)
 	      }),
 	    crypto.subtle.exportKey("jwk", keys['next']['pri'])
 	      .then(function(str){
 		addKey(str, "pri", "next");
 	      })
 	      .catch(function(err){
-		dump("\nError storing next private key" + " " + err)
+		hump("\nError storing next private key" + " " + err)
 	      })])
 	    .then(function(){
-	      dump("\nFinished storing new key-pair");
+	      hump("\nFinished storing new key-pair");
 	      registerHttp(); // register http request listener
 	    })
 	    .catch(function(err){
-	      dump("\nError storing next keypair:" + err);
+	      hump("\nError storing next keypair:" + err);
 	    });
 	})
 	.catch(function(err){
-	  dump("\nError generating next key after reg" + err);
+	  hump("\nError generating next key after reg" + err);
 	});
     })
     .catch(function(err){
-      dump("\nError storing keypair for" + origin + " " + err);
+      hump("\nError storing keypair for" + origin + " " + err);
     });
 }
 
 // Returns Promise to generate a key
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){
-  dump("\nEntered genNextkey");
+  hump("\nEntered genNextkey");
   delKey("pub", "next");
   delKey("pri", "next");
 
@@ -461,11 +469,11 @@ function genNextKey(){
 /*
   BEGIN EXECUTION
 */
-dump("\nBEGIN EXECUTION");
+hump("\nBEGIN EXECUTION");
 
 //resetKeyStorage();
 if(! initKeyStorage()){ // Initialize our keys and storage
-  dump("\nGenerating next RSA key and storing it");
+  hump("\nGenerating next RSA key and storing it");
   genNextKey()
     .then(function(keyPair){
       keys['next'] = {}; // Set our volatile copy of next-key
@@ -478,24 +486,24 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	    addKey(str, "pub", "next");
 	  })
 	  .catch(function(err){
-	    dump("\nError storing next public key" + " " + err)
+	    hump("\nError storing next public key" + " " + err)
 	  }),
 	crypto.subtle.exportKey("jwk", keys['next']['pri'])
 	  .then(function(str){
 	    addKey(str, "pri", "next");
 	  })
 	  .catch(function(err){
-	    dump("\nError storing next private key" + " " + err)
+	    hump("\nError storing next private key" + " " + err)
 	  })])
 	.then(function(){
 	  registerHttp(); // register http request listener
 	})
 	.catch(function(err){
-	  dump("\nError storing next keypair:" + err);
+	  hump("\nError storing next keypair:" + err);
 	});
     })
     .catch(function(err){
-      dump("\nError running genKey" + " " + err)
+      hump("\nError running genKey" + " " + err)
     });
 
 }else{ // NV key storage exists, read next-key from NV to V storage
@@ -506,19 +514,19 @@ if(! initKeyStorage()){ // Initialize our keys and storage
 	keys['next']['pub'] = key;
       })
       .catch(function(err){
-	dump("\nError importing next public key" + " " + err)
+	hump("\nError importing next public key" + " " + err)
       }),
     getKey("pri", "next")
       .then(function(key){
 	keys['next']['pri'] = key;
       })
       .catch(function(err){
-	dump("\nError importing next private key" + " " + err)
+	hump("\nError importing next private key" + " " + err)
       })])
     .then(function(){
       registerHttp(); // register http request listener
     })
     .catch(function(err){
-      dump("\nError importing keys:" + err);
+      hump("\nError importing keys:" + err);
     });
 }
