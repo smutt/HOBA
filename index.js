@@ -18,6 +18,7 @@ var regInWork = false; // Are we in the process of registering?
 var alg = "0"; // We only support RSA-SHA256
 var kidType = "0"; // We only support hashed public keys for kid-type
 var didType = "0"; // This is the only entry in the IANA registry
+var maxDidLength = 20; // Maximum character length for a device ID
 
 // A simple wrapper for the dump() function
 function hump(str){
@@ -38,31 +39,33 @@ var menuItem = menuItem.Menuitem({
 });
 
 // Construct a panel, loading its content from the "cfgPanel.html"
-// file in the "data" directory, and loading the "get-text.js" script
-// into it.
+// file in the "data" directory, and loading the "get-text.js" script into it
 // https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
 var cfgPanel = require("sdk/panel").Panel({
+  width:800,
+  height:400,
   contentURL: data.url("cfgPanel.html"),
   contentScriptFile: data.url("cfgPanel.js"),
+  contextMenu: true,
 });
 
 // When the panel is displayed it generated an event called
 // "show": we will listen for that event and when it happens,
-// send our own "show" event to the panel's script, so the
-// script can prepare the panel for display.
-cfgPanel.on("show", function() {
-  // Prepare data to be sent
-  var key1 = ["hash1", "site1"];
-  var key2 = ["hash2", "site2"];
-  var key3 = ["hash3", "site3"];
-  var data = [key1, key2, key3];
-
-  cfgPanel.port.emit("show", data);
+// send our own "show" event to the panel's script
+// so the script can prepare the panel for display.
+cfgPanel.on("show", function(){
+  cfgPanel.port.emit("show", ss.storage.deviceID, ss.storage.usedKeys);
 });
 
 // Listen for messages called "finished" coming from the content script.
-cfgPanel.port.on("finished", function(data){
-  // Do something here?
+// If user set deviceID clobber storage and set new deviceID
+cfgPanel.port.on("finished", function(deviceID){
+  if(deviceID != null && deviceID.trim() != ""){    
+    resetKeyStorage();
+    initKeyStorage();
+    ss.storage.deviceID = deviceID;
+    genFirstNextKey();
+  }
   cfgPanel.hide();
 });
 
@@ -145,7 +148,7 @@ function handleHttpReq(aSubject, aTopic, aData){
 	crypto.subtle.exportKey("jwk", keys['next']['pub'])
 	  .then(function(jwkObj){
 	    jwk = JSON.stringify(jwkObj);
-	    var kid = sha256.hash(jwk);
+	    var kid = sha256.hash(jwk).trim();
 	    
 	    var req = new XMLHttpRequest();
 	    req.open("POST", tbsOrigin + "/.well-known/hoba/register", true);
@@ -158,6 +161,16 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      if(hobaReg == 'regok'){ // Registration succeeded
 		hump("\nregok");
 		regInWork = false;
+
+		// Set usedKeys info
+		var tmp = {};
+		tmp['kid'] = kid;
+		tmp['site'] = origin.split(":")[1];
+		tmp['realm'] = realm;
+		tmp['created'] = Date.now();
+		tmp['accessed'] = Date.now();
+		ss.storage.usedKeys.push(tmp);
+		
 		rotateNextKey(origin, realm);
 	      }else if(hobaReg == 'reginwork'){ // HTTP POST returned but registration not done yet
 		keys['reginwork'] = {}; // If there was a previous registration that never finished clobber it
@@ -204,6 +217,13 @@ function handleHttpReq(aSubject, aTopic, aData){
 		jwk = JSON.stringify(jwkObj);
 		var kid = sha256.hash(jwk);
 
+		// Update the last accessed time for the key
+		for(var ii = 0; ii<ss.storage.usedKeys.length; ii++){
+		  if(ss.storage.usedKeys[ii]['kid'] === kid){
+		    ss.storage.usedKeys[ii]['accessed'] = Date.now();
+		  }
+		}
+		
 		var req = new XMLHttpRequest();
 		req.open("GET", tbsOrigin + "/.well-known/hoba/login", true);
 
@@ -319,16 +339,21 @@ function getTbsOrigin(uri){
 // If not init from scratch
 // Return False if not init'd
 // Otherwise return True
-// For now this does not persist across restarts
 function initKeyStorage(){
   if(! ss.storage.keys_exists || ss.storage.keys_exists === null || ss.storage.keys_exists == undefined){
     resetKeyStorage();
     ss.storage.keys_exists = true;
     ss.storage.keys = {};
-    
+
+    // Generate a random deviceID
     var rands = new Uint16Array(1);
     crypto.getRandomValues(rands);
     ss.storage.deviceID = "firefox_" + rands[0].toString(10);
+
+    // Init array for holding display information for keys used
+    // Each entry has kid, site, realm, created, accessed
+    // timestamps are JS timestamps in milliseconds since UNIX epoch
+    ss.storage.usedKeys = [];
 
     return false;
   }else{
@@ -339,10 +364,10 @@ function initKeyStorage(){
 // Resets V and NV key storage
 function resetKeyStorage(){
   keys = {}
-  ss.storage.keys = null
+  ss.storage.keys = null;
   ss.storage.deviceID = null;
+  ss.storage.usedKeys = null;
   ss.storage.keys_exists = false;
-
 }
   
 // Computes key Index for local non-volatile(NV) storage, simple-storage
@@ -487,14 +512,11 @@ function genNextKey(){
   );
 }
 
-/*
-  BEGIN EXECUTION
-*/
-hump("\nBEGIN EXECUTION");
-
-//resetKeyStorage();
-if(! initKeyStorage()){ // Initialize our keys and storage
-  hump("\nGenerating next RSA key and storing it");
+// Generates our first next key if we have nothing in storage
+// nextKey is actually the name of the key in storage, and this function generates it
+// Takes nada, returns nada
+function genFirstNextKey(){
+  hump("\nGenerating first next RSA key and storing it");
   genNextKey()
     .then(function(keyPair){
       keys['next'] = {}; // Set our volatile copy of next-key
@@ -526,7 +548,16 @@ if(! initKeyStorage()){ // Initialize our keys and storage
     .catch(function(err){
       hump("\nError running genKey" + " " + err)
     });
+}
 
+/*
+  BEGIN EXECUTION
+*/
+hump("\nBEGIN EXECUTION");
+
+//resetKeyStorage();
+if(! initKeyStorage()){ // Initialize our keys and storage
+  genFirstNextKey();
 }else{ // NV key storage exists, read next-key from NV to V storage
   keys['next'] = {};
   Promise.all([
