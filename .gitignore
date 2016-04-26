@@ -1,7 +1,6 @@
 sslkey.log
 *~
 node_modules/*
-test.html
 test.js
 old_lib/*
 

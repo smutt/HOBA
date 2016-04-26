@@ -1,3 +1,22 @@
+/*
+  The file is part of the Firefox HOBA client.
+  
+  HOBA client is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+  
+  HOBA client is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  GNU General Public License for more details.
+  
+  You should have received a copy of the GNU General Public License
+  along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+  Copyright (C) 2016, Andrew McConachie, <andrew@depht.com>
+*/
+
 // Some discussion and bitching by me, also some really helpful links from people
 // https://discourse.mozilla-community.org/t/how-do-i-know-if-a-node-js-library-will-work-in-my-add-on/6845/8
 // Info on JS SPKI to PEM conversion
@@ -409,7 +428,7 @@ function addKey(str, postFix, origin, realm=""){
 // Returns Promise to return a key associated with origin 
 // If no key stored returns a Promise that resolves to false
 function getKey(postFix, origin, realm=""){
-  hump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
+  //hump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
   var idx = nvIdx(postFix, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     hump("\nDid NOT find key for:" + idx);
