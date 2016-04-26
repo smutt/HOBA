@@ -18,6 +18,14 @@
 */
 // https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
 
+function addHead(str){
+  return "<th>" + str + "</th>";
+}
+
+function addCell(str){
+  return "<td>" + str + "</td>";
+}
+
 self.port.on("show", function onShow(deviceID, keys){
   document.getElementById("h2-id").innerHTML = "Device Name: " + deviceID;
 
@@ -31,16 +39,23 @@ self.port.on("show", function onShow(deviceID, keys){
 
   var keyTable = "";
   if(displayRealm){
-    keyTable += "<thead><tr><th>Site</th><th>Key Identifier</th><th>Realm</th></tr></thead><tbody>";
+    var headers = ["Site", "Key Identifier", "Realm"];
   }else{
-    keyTable += "<thead><tr><th>Site</th><th>Key Identifier</th></tr></thead><tbody>";
+    var headers = ["Site", "Key Identifier"];
   }
+
+  keyTable += "<thead><tr>";
+  headers.forEach( function(str){
+    keyTable += addHead(str);
+  });
+  keyTable += "</tr></thead><tbody>";
+
   for(var ii=0; ii<keys.length; ii++){
     keyTable += "<tr>";
-    keyTable += "<td><h4>" + keys[ii]['site'].trim() + "</h4></td>";
-    keyTable += "<td><h4>" + keys[ii]['kid'] + "</h4></td>";
+    keyTable += addCell(keys[ii]['site'].trim());
+    keyTable += addCell(keys[ii]['kid']);
     if(displayRealm){
-      keyTable += "<td><h4>" + keys[ii]['realm'].trim() + "</h4></td>";
+      keyTable += addCell(keys[ii]['realm'].trim())
     }
     keyTable += "</tr>";
   }
