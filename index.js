@@ -12,6 +12,7 @@ var sha256 = require("lib/sha256.js");
 Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDecoder", "TextEncoder"]);
 
 // Some global variables. see RFC 7486 for details
+var httpHandlerRegistered = false; // Is our HTTP handler function registered?
 var dbg = true; // Set to true to enable debugging to the console
 var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
@@ -76,16 +77,20 @@ function showCfgPanel(state) {
 
 // Register observer service
 function registerHttp(){
-  var observerService =
-    Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-  observerService.addObserver(handleHttpReq, "http-on-examine-response", false);
+  if(! httpHandlerRegistered){
+    httpHandlerRegistered = true;
+    var observerService = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
+    observerService.addObserver(handleHttpReq, "http-on-examine-response", false);
+  }
 }
 
 // Unregister observer service
 function unregisterHttp(){
-  var observerService =
-    Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-  observerService.removeObserver(handleHttpReq, "http-on-examine-response");
+  if(httpHandlerRegistered){
+    httpHandlerRegistered = false;
+    var observerService = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
+    observerService.removeObserver(handleHttpReq, "http-on-examine-response");
+  }
 }
 
 // Handle HTTP listener events
@@ -109,7 +114,8 @@ function handleHttpReq(aSubject, aTopic, aData){
   }
   if(authChallenge.search(/(H|h)(O|o)(B|b)(A|a)/) == -1){ return; }
   var chalB64 = authChallenge.match(/challenge=(.*?),/)[1];
-
+  //hump("\nHandling HOBA HTTP Request");
+  
   // Are we finishing up an earlier registration?
   try{
     var hobaReg = aSubject.getResponseHeader("Hobareg");
@@ -160,18 +166,20 @@ function handleHttpReq(aSubject, aTopic, aData){
 	      var hobaReg = req.getAllResponseHeaders().match(/hobareg:(.*)/i)[1].trim();
 	      if(hobaReg == 'regok'){ // Registration succeeded
 		hump("\nregok");
-		regInWork = false;
+		if(regInWork == true){ // Defensive programming
+		  regInWork = false;
 
-		// Set usedKeys info
-		var tmp = {};
-		tmp['kid'] = kid;
-		tmp['site'] = origin.split(":")[1];
-		tmp['realm'] = realm;
-		tmp['created'] = Date.now();
-		tmp['accessed'] = Date.now();
-		ss.storage.usedKeys.push(tmp);
-		
-		rotateNextKey(origin, realm);
+		  // Set usedKeys info
+		  var tmp = {};
+		  tmp['kid'] = kid;
+		  tmp['site'] = origin.split(":")[1];
+		  tmp['realm'] = realm;
+		  tmp['created'] = Date.now();
+		  tmp['accessed'] = Date.now();
+		  ss.storage.usedKeys.push(tmp);
+		  
+		  rotateNextKey(origin, realm);
+		}
 	      }else if(hobaReg == 'reginwork'){ // HTTP POST returned but registration not done yet
 		keys['reginwork'] = {}; // If there was a previous registration that never finished clobber it
 		keys['reginwork']['pub'] = keys['next']['pub'];
@@ -401,7 +409,7 @@ function addKey(str, postFix, origin, realm=""){
 // Returns Promise to return a key associated with origin 
 // If no key stored returns a Promise that resolves to false
 function getKey(postFix, origin, realm=""){
-  //hump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
+  hump("\nEntered getKey postFix!" + postFix + " origin!" + origin + " realm!" + realm);
   var idx = nvIdx(postFix, origin, realm);
   if(ss.storage.keys[idx] === undefined || ss.storage.keys[idx] === null){
     hump("\nDid NOT find key for:" + idx);
@@ -517,6 +525,7 @@ function genNextKey(){
 // Takes nada, returns nada
 function genFirstNextKey(){
   hump("\nGenerating first next RSA key and storing it");
+  unregisterHttp();
   genNextKey()
     .then(function(keyPair){
       keys['next'] = {}; // Set our volatile copy of next-key
@@ -554,8 +563,8 @@ function genFirstNextKey(){
   BEGIN EXECUTION
 */
 hump("\nBEGIN EXECUTION");
+//resetKeyStorage(); // This is only here for debugging
 
-//resetKeyStorage();
 if(! initKeyStorage()){ // Initialize our keys and storage
   genFirstNextKey();
 }else{ // NV key storage exists, read next-key from NV to V storage
