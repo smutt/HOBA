@@ -183,11 +183,10 @@ function handleHttpReq(aSubject, aTopic, aData){
 	    req.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
 	    req.onreadystatechange = function (){ // We currently don't deal with failures at all
 	      if(req.readyState !== XMLHttpRequest.DONE){ return; }
-	      hump("\nRegistration finished");
+	      //hump("\nRegistration finished");
 
 	      var hobaReg = req.getAllResponseHeaders().match(/hobareg:(.*)/i)[1].trim();
 	      if(hobaReg == 'regok'){ // Registration succeeded
-		hump("\nregok");
 		if(regInWork == true){ // Defensive programming
 		  regInWork = false;
 
@@ -481,7 +480,7 @@ function rotateNextKey(origin, realm){
       unregisterHttp(); // Until we have a key ready we should not accept more HOBA attempts
       genNextKey()
 	.then(function(keyPair){
-	  hump("\nFinished generating new key-pair");
+	  //hump("\nFinished generating new key-pair");
 	  keys['next'] = {}; // Set our volatile copy of next-key
 	  keys['next']['pub'] = keyPair.publicKey;
 	  keys['next']['pri'] = keyPair.privateKey;
@@ -501,7 +500,7 @@ function rotateNextKey(origin, realm){
 		hump("\nError storing next private key" + " " + err)
 	      })])
 	    .then(function(){
-	      hump("\nFinished storing new key-pair");
+	      // hump("\nFinished storing new key-pair");
 	      registerHttp(); // register http request listener
 	    })
 	    .catch(function(err){
@@ -520,7 +519,6 @@ function rotateNextKey(origin, realm){
 // Returns Promise to generate a key
 // Many thanks to https://github.com/diafygi/webcrypto-examples
 function genNextKey(){
-  hump("\nEntered genNextkey");
   delKey("pub", "next");
   delKey("pri", "next");
 
@@ -540,7 +538,7 @@ function genNextKey(){
 // nextKey is actually the name of the key in storage, and this function generates it
 // Takes nada, returns nada
 function genFirstNextKey(){
-  hump("\nGenerating first next RSA key and storing it");
+  //hump("\nGenerating first next RSA key and storing it");
   unregisterHttp();
   genNextKey()
     .then(function(keyPair){
