@@ -7,28 +7,16 @@
           <em:unpack>false</em:unpack>
           <em:version>0.1.0</em:version>
           <em:name>HOBA</em:name>
-          <em:description>HTTP Origin Based Authentication (RFC 7486)</em:description>
-          <em:creator>Andrew McConachie andrew@depht.com</em:creator>
+          <em:description>Implements HOBA(RFC7486)</em:description>
+          <em:creator>Andrew McConachie</em:creator>
           <em:optionsURL>data:text/xml,&lt;placeholder/&gt;</em:optionsURL>
           <em:optionsType>2</em:optionsType>
-
           <em:targetApplication>
             <Description>
               <em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id>
               <em:minVersion>38.0a1</em:minVersion>
-              <em:maxVersion>43.0</em:maxVersion>
-</Description>
-</em:targetApplication>
-
-          <em:targetApplication>
-            <Description>
-              <em:id>{aa3c5121-dab2-40e2-81ca-7ea25febc110}</em:id>
-              <em:minVersion>38.0a1</em:minVersion>
-              <em:maxVersion>43.0</em:maxVersion>
-</Description>
-</em:targetApplication>
-
-
+              <em:maxVersion>49.0</em:maxVersion>
+	    </Description>
+	  </em:targetApplication>
     </Description>
-
 </RDF>
