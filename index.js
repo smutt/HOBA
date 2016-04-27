@@ -120,7 +120,10 @@ function handleHttpReq(aSubject, aTopic, aData){
   aSubject.QueryInterface(Ci.nsIHttpChannel);
 
   // Is the connection using TLS?
-  if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
+  if(aSubject.securityInfo == null){ return; }
+  else{
+    if(! aSubject.securityInfo.QueryInterface(Ci.nsISSLStatusProvider).SSLStatus) { return; }
+  }
   //hump("\nhandleHttpReq: " + aSubject.URI.spec + " " + aSubject.contentType);
 
   // Is there auth, and is it HOBA?
