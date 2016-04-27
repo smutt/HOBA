@@ -129,6 +129,7 @@ function handleHttpReq(aSubject, aTopic, aData){
   // Is there auth, and is it HOBA?
   // For now we don't worry about challenge timeout
   // getResponseHeader() will bork if requesting non-present header
+  // This call to getResponseHeader() will generate errors "TypeError: can't access dead object" after plugin is disabled/enabled
   try{
     var authChallenge = aSubject.getResponseHeader("WWW-Authenticate");
   }catch(err){
@@ -164,7 +165,6 @@ function handleHttpReq(aSubject, aTopic, aData){
   var tbsOrigin = getTbsOrigin(aSubject.URI.spec);
   getKey('pri', origin, realm)
     .then(function(privateKey){
-
       // Generate our 32-bit nonce
       var rands = new Uint32Array(1);
       crypto.getRandomValues(rands);
@@ -217,9 +217,6 @@ function handleHttpReq(aSubject, aTopic, aData){
 		var kidB64 = b64ToUrlb64(btoa(kid));
 		var nonceB64 = b64ToUrlb64(btoa(nonce));
 		var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
-
-		//hump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
-		//hump("\nauthHeader:" + authHeader);
 		req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 
 		// RFC 7486 lists kid as optional but it's really not
@@ -263,9 +260,6 @@ function handleHttpReq(aSubject, aTopic, aData){
                     var kidB64 = b64ToUrlb64(btoa(kid));
                     var nonceB64 = b64ToUrlb64(btoa(nonce));
                     var authHeader = kidB64 + "." + chalB64 + "." + nonceB64 + "." + tbsSigB64;
-
-		    //hump("\nkid:" + kid + "\nchalB64:" + chalB64 + "\nnonce:" + nonce);
-                    //hump("\nauthHeader:" + authHeader);
 		    req.setRequestHeader("Authorization","HOBA result=" + authHeader);
 		    req.send();
 		  })
@@ -447,7 +441,7 @@ function getKey(postFix, origin, realm=""){
       }
     }
   }
-  
+
   if(postFix == "pub"){
     usage = "verify";
   }else{
