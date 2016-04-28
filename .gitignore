@@ -4,4 +4,6 @@ node_modules/*
 test.js
 old_lib/*
 *.old
+*.new
+*.xpi
 
