@@ -19,15 +19,31 @@
 // https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
 
 function addHead(str){
-  return "<th>" + str + "</th>";
+  return "<td>" + str + "</td>";
 }
 
 function addCell(str){
   return "<td>" + str + "</td>";
 }
 
+// Javascript is retarded with time
+// Stolen from https://gist.github.com/hurjas/2660489
+function tStampFmt(t){
+  var o = new Date(t);
+  var date = [o.getMonth() + 1, o.getDate(), o.getFullYear()];
+
+  var time = [o.getHours(), o.getMinutes(), o.getSeconds()];
+  for(var ii=1; ii<3; ii++){ // If seconds and minutes are less than 10, add a zero
+    if(time[ii] < 10){
+      time[ii] = "0" + time[ii];
+    }
+  }
+  
+  return date.join("/") + " " + time.join(":");
+}
+
 self.port.on("show", function onShow(deviceID, keys){
-  document.getElementById("h2-id").innerHTML = "Device Name: " + deviceID;
+  document.getElementById("h2-id").innerHTML = deviceID;
 
   // Is anyone using realm?
   displayRealm = false;
@@ -39,9 +55,9 @@ self.port.on("show", function onShow(deviceID, keys){
 
   var keyTable = "";
   if(displayRealm){
-    var headers = ["Site", "Key Identifier", "Realm"];
+    var headers = ["Site", "Realm", "Created", "Last Used"];
   }else{
-    var headers = ["Site", "Key Identifier"];
+    var headers = ["Site", "Created", "Last Used"];
   }
 
   keyTable += "<thead><tr>";
@@ -53,11 +69,13 @@ self.port.on("show", function onShow(deviceID, keys){
   for(var ii=0; ii<keys.length; ii++){
     keyTable += "<tr>";
     keyTable += addCell(keys[ii]['site'].trim());
-    keyTable += addCell(keys[ii]['kid']);
     if(displayRealm){
       keyTable += addCell(keys[ii]['realm'].trim())
     }
+    keyTable += addCell(tStampFmt(keys[ii]['created']));
+    keyTable += addCell(tStampFmt(keys[ii]['accessed']));
     keyTable += "</tr>";
+    keyTable += "<tr><td colspan='" + headers.length.toString() + "' align='center'>" + keys[ii]['kid'] + "</td></tr>";
   }
   keyTable += "</tbody>";
   document.getElementById("table-id").innerHTML = keyTable;  
