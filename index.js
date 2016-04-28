@@ -36,7 +36,7 @@ var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
 
 // Some global constants
-const dbg = true; // Set to true to enable debugging to the console
+const dbg = false; // Set to true to enable debugging to the console
 const maxDidLength = 20; // Maximum character length for a device ID
 const minDidLength = 8; // Minimum character length for a device ID
 const alg = "0"; // We only support RSA-SHA256

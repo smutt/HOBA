@@ -1,0 +1,14 @@
+.DS_Store
+*~
+*.sh
+*.zip
+*.xpi
+*.log
+
+.git/*
+.gitignore
+
+test.js
+test/*
+
+.jpmignore
