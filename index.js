@@ -38,7 +38,8 @@ var regInWork = false; // Are we in the process of registering?
 var alg = "0"; // We only support RSA-SHA256
 var kidType = "0"; // We only support hashed public keys for kid-type
 var didType = "0"; // This is the only entry in the IANA registry
-var maxDidLength = 20; // Maximum character length for a device ID
+const maxDidLength = 20; // Maximum character length for a device ID
+const minDidLength = 8; // Minimum character length for a device ID
 
 // A simple wrapper for the dump() function
 function hump(str){
@@ -80,11 +81,16 @@ cfgPanel.on("show", function(){
 // Listen for messages called "finished" coming from the content script.
 // If user set deviceID clobber storage and set new deviceID
 cfgPanel.port.on("finished", function(deviceID){
-  if(deviceID != null && deviceID.trim() != ""){    
-    resetKeyStorage();
-    initKeyStorage();
-    ss.storage.deviceID = deviceID;
-    genFirstNextKey();
+  if(deviceID != null){
+    deviceID = deviceID.trim().toUpperCase();
+    if(deviceID.length > minDidLength && deviceID.length <= maxDidLength){
+      if(deviceID == deviceID.match(/^[A-Z,0-9]{1}[A-Z,0-9,-_]+$/)){
+	resetKeyStorage();
+	initKeyStorage();
+	ss.storage.deviceID = deviceID;
+	genFirstNextKey();
+      }
+    }
   }
   cfgPanel.hide();
 });

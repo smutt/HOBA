@@ -18,6 +18,8 @@
 */
 // https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
 
+var devID = document.getElementById("input-id"); // DeviceID input box
+
 function addHead(str){
   return "<td>" + str + "</td>";
 }
@@ -43,6 +45,7 @@ function tStampFmt(t){
 }
 
 self.port.on("show", function onShow(deviceID, keys){
+  devID.value = "";
   document.getElementById("h2-id").innerHTML = deviceID;
 
   // Is anyone using realm?
@@ -81,7 +84,6 @@ self.port.on("show", function onShow(deviceID, keys){
   document.getElementById("table-id").innerHTML = keyTable;  
 });
 
-var devID = document.getElementById("input-id");
 devID.addEventListener('keyup', function onkeyup(event){
   if(event.keyCode == 13){
     str = devID.value.trim();
