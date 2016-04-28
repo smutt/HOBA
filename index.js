@@ -32,14 +32,16 @@ Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDeco
 
 // Some global variables. see RFC 7486 for details
 var httpHandlerRegistered = false; // Is our HTTP handler function registered?
-var dbg = true; // Set to true to enable debugging to the console
 var keys = {}; // Our dict of keys read into memory
 var regInWork = false; // Are we in the process of registering?
-var alg = "0"; // We only support RSA-SHA256
-var kidType = "0"; // We only support hashed public keys for kid-type
-var didType = "0"; // This is the only entry in the IANA registry
+
+// Some global constants
+const dbg = true; // Set to true to enable debugging to the console
 const maxDidLength = 20; // Maximum character length for a device ID
 const minDidLength = 8; // Minimum character length for a device ID
+const alg = "0"; // We only support RSA-SHA256
+const kidType = "0"; // We only support hashed public keys for kid-type
+const didType = "0"; // This is the only entry in the IANA registry
 
 // A simple wrapper for the dump() function
 function hump(str){
