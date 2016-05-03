@@ -5,7 +5,7 @@
           <em:type>2</em:type>
           <em:bootstrap>true</em:bootstrap>
           <em:unpack>false</em:unpack>
-          <em:version>0.1.0</em:version>
+          <em:version>0.1.1</em:version>
           <em:name>HOBA</em:name>
           <em:description>HTTP Origin Based Authentication (RFC 7486)</em:description>
           <em:creator>Andrew McConachie andrew@depht.com</em:creator>

@@ -1,7 +1,7 @@
 {
   "title": "HOBA",
   "name": "hoba",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTTP Origin Based Authentication (RFC 7486)",
   "main": "index.js",
   "author": "Andrew McConachie andrew@depht.com",
