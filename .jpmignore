@@ -14,4 +14,3 @@ test/*
 .jpmignore
 tmp/*
 FF-Profiles/*
-node_modules/*
