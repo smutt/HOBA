@@ -26,8 +26,8 @@ var self = require("sdk/self");
 var data = require("sdk/self").data;
 var ss = require("sdk/simple-storage");
 let {Cu, Cc, Ci} = require('chrome');
-var menuItem = require("menuitem");
 var sha256 = require("lib/sha256.js");
+var prefs = require("sdk/simple-prefs");
 Cu.importGlobalProperties(["crypto", "atob", "btoa", "XMLHttpRequest", "TextDecoder", "TextEncoder"]);
 
 // Some global variables. see RFC 7486 for details
@@ -37,69 +37,18 @@ var regInWork = false; // Are we in the process of registering?
 
 // Some global constants
 const dbg = false; // Set to true to enable debugging to the console
-const maxDidLength = 20; // Maximum character length for a device ID
-const minDidLength = 8; // Minimum character length for a device ID
 const alg = "0"; // We only support RSA-SHA256
 const kidType = "0"; // We only support hashed public keys for kid-type
 const didType = "0"; // This is the only entry in the IANA registry
+const didOptions = ["WORK", "BUSINESS", "HOME", "PERSONAL", "LAPTOP", // This MUST match what's in package.json for DeviceName
+		      "TABLET", "MOBILE", "SAD-GIRAFFE", "HAPPY-PANDA",
+		      "ANGRY-KOALA", "MEME-GENERATOR", "CAPTIVE-AUDIENCE"];
 
 // A simple wrapper for the dump() function
 function hump(str){
   if(dbg){
     dump(str);
   }
-}
-
-// Adds a clickable to the "Tools" dropdown
-var menuItem = menuItem.Menuitem({
-  id: "clickme",
-  menuid: "menu_ToolsPopup",
-  label: "HOBA",
-  onCommand: function(){
-    showCfgPanel()
-  },
-  insertbefore: "menu_pageInfo"
-});
-
-// Construct a panel, loading its content from the "cfgPanel.html"
-// file in the "data" directory, and loading the "get-text.js" script into it
-// https://developer.mozilla.org/en-US/Add-ons/SDK/Tutorials/Display_a_Popup
-var cfgPanel = require("sdk/panel").Panel({
-  width:800,
-  height:400,
-  contentURL: data.url("cfgPanel.html"),
-  contentScriptFile: data.url("cfgPanel.js"),
-  contextMenu: true,
-});
-
-// When the panel is displayed it generated an event called
-// "show": we will listen for that event and when it happens,
-// send our own "show" event to the panel's script
-// so the script can prepare the panel for display.
-cfgPanel.on("show", function(){
-  cfgPanel.port.emit("show", ss.storage.deviceID, ss.storage.usedKeys);
-});
-
-// Listen for messages called "finished" coming from the content script.
-// If user set deviceID clobber storage and set new deviceID
-cfgPanel.port.on("finished", function(deviceID){
-  if(deviceID != null){
-    deviceID = deviceID.trim().toUpperCase();
-    if(deviceID.length > minDidLength && deviceID.length <= maxDidLength){
-      if(deviceID == deviceID.match(/^[A-Z,0-9]{1}[A-Z,0-9,-_]+$/)){
-	resetKeyStorage();
-	initKeyStorage();
-	ss.storage.deviceID = deviceID;
-	genFirstNextKey();
-      }
-    }
-  }
-  cfgPanel.hide();
-});
-
-// Show the panel when the user activates the menu item
-function showCfgPanel(state) {
-  cfgPanel.show();
 }
 
 // Register observer service
@@ -366,6 +315,20 @@ function getTbsOrigin(uri){
   return proto + "://" + host + port;
 }
 
+// Callback function to set Device ID
+function setDeviceName(){
+  hump("\nChanging DID to " + prefs.prefs["DeviceName"].toString() +
+       " " + didOptions[prefs.prefs["DeviceName"]]);
+
+  var newDid = didOptions[prefs.prefs["DeviceName"]];
+  if(newDid !== ss.storage.deviceID){
+    resetKeyStorage();
+    initKeyStorage();
+    ss.storage.deviceID = newDid;
+    genFirstNextKey();
+  }
+}
+
 // Check if simple storage is already init'd
 // If not init from scratch
 // Return False if not init'd
@@ -376,15 +339,13 @@ function initKeyStorage(){
     ss.storage.keys_exists = true;
     ss.storage.keys = {};
 
-    // Generate a random deviceID
-    var rands = new Uint16Array(1);
-    crypto.getRandomValues(rands);
-    ss.storage.deviceID = "firefox_" + rands[0].toString(10);
-
     // Init array for holding display information for keys used
     // Each entry has kid, site, realm, created, accessed
     // timestamps are JS timestamps in milliseconds since UNIX epoch
     ss.storage.usedKeys = [];
+
+    // Reset our stored device name to the browser preference
+    ss.storage.deviceID = didOptions[prefs.prefs['DeviceName']];
 
     return false;
   }else{
@@ -394,7 +355,7 @@ function initKeyStorage(){
 
 // Resets V and NV key storage
 function resetKeyStorage(){
-  keys = {}
+  keys = {};
   ss.storage.keys = null;
   ss.storage.deviceID = null;
   ss.storage.usedKeys = null;
@@ -585,7 +546,9 @@ function genFirstNextKey(){
   BEGIN EXECUTION
 */
 hump("\nBEGIN EXECUTION");
-//resetKeyStorage(); // This is only here for debugging
+//resetKeyStorage(); // This is only here for testing
+
+prefs.on("DeviceName", setDeviceName); // Register our call-back func for Device Name change
 
 if(! initKeyStorage()){ // Initialize our keys and storage
   genFirstNextKey();

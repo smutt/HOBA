@@ -1,7 +1,7 @@
 {
   "title": "HOBA",
   "name": "hoba",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "HTTP Origin Based Authentication (RFC 7486)",
   "main": "index.js",
   "author": "Andrew McConachie andrew@depht.com",
@@ -18,6 +18,7 @@
       "type": "radio",
       "title": "Public Key Format",
       "value": "JWK",
+      "description": "Not currently implemented",
       "options": [
         {
           "value": "JWK",
@@ -28,7 +29,65 @@
           "label": "PEM"
         }
       ]
+    },
+    {
+      "name": "DeviceName",
+      "type": "menulist",
+      "title": "Name of this Device",
+      "value": 0,
+      "description": "Pick a name for this HOBA device. Each of your HOBA devices must have a different name. WARNING: Changing this resets all HOBA data.",
+      "options": [
+        {
+          "value": "0",
+          "label": "WORK"
+        },
+        {
+          "value": "1",
+          "label": "BUSINESS"
+        },
+        {
+          "value": "2",
+          "label": "HOME"
+        },
+        {
+          "value": "3",
+          "label": "PERSONAL"
+        },
+        {
+          "value": "4",
+          "label": "LAPTOP"
+        },
+        {
+          "value": "5",
+          "label": "TABLET"
+        },
+        {
+          "value": "6",
+          "label": "MOBILE"
+        },
+        {
+          "value": "7",
+          "label": "SAD-GIRAFFE"
+        },
+        {
+          "value": "8",
+          "label": "HAPPY-PANDA"
+        },
+        {
+          "value": "9",
+          "label": "ANGRY-KOALA"
+        },
+        {
+          "value": "10",
+          "label": "MEME-GENERATOR"
+        },
+        {
+          "value": "11",
+          "label": "CAPTIVE-AUDIENCE"
+        }
+      ]
     }
+
   ],
   "dependencies": {
     "menuitem": "0.0.5"

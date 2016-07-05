@@ -5,4 +5,5 @@ old_lib/*
 *.old
 *.new
 *.xpi
-
+tmp/*
+FF-Profiles
