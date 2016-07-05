@@ -13,3 +13,4 @@ test/*
 
 .jpmignore
 tmp/*
+FF-Profiles/*
